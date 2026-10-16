@@ -16,15 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 
+import { redirectToDefaultSection } from '@/features/system-settings/utils/route-config'
 import { USAGE_LOGS_DEFAULT_SECTION } from '@/features/usage-logs/section-registry'
 
 export const Route = createFileRoute('/_authenticated/usage-logs/')({
   beforeLoad: () => {
-    throw redirect({
-      to: '/usage-logs/$section',
-      params: { section: USAGE_LOGS_DEFAULT_SECTION },
-    })
+    redirectToDefaultSection(USAGE_LOGS_DEFAULT_SECTION, '/usage-logs/$section')
   },
 })

@@ -16,25 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 
 import { AuthSettings } from '@/features/system-settings/auth'
 import {
   AUTH_DEFAULT_SECTION,
   AUTH_SECTION_IDS,
 } from '@/features/system-settings/auth/section-registry.tsx'
+import { guardSectionParam } from '@/features/system-settings/utils/route-config'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/auth/$section'
 )({
   beforeLoad: ({ params }) => {
-    const validSections = AUTH_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/system-settings/auth/$section',
-        params: { section: AUTH_DEFAULT_SECTION },
-      })
-    }
+    guardSectionParam(
+      params.section,
+      AUTH_SECTION_IDS,
+      AUTH_DEFAULT_SECTION,
+      '/system-settings/auth/$section'
+    )
   },
   component: AuthSettings,
 })

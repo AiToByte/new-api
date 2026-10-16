@@ -16,25 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 
 import { ContentSettings } from '@/features/system-settings/content'
 import {
   CONTENT_DEFAULT_SECTION,
   CONTENT_SECTION_IDS,
 } from '@/features/system-settings/content/section-registry.tsx'
+import { guardSectionParam } from '@/features/system-settings/utils/route-config'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/content/$section'
 )({
   beforeLoad: ({ params }) => {
-    const validSections = CONTENT_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/system-settings/content/$section',
-        params: { section: CONTENT_DEFAULT_SECTION },
-      })
-    }
+    guardSectionParam(
+      params.section,
+      CONTENT_SECTION_IDS,
+      CONTENT_DEFAULT_SECTION,
+      '/system-settings/content/$section'
+    )
   },
   component: ContentSettings,
 })

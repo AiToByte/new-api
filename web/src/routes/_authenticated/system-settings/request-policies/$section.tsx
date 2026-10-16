@@ -16,22 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 
 import { RequestPolicies } from '@/features/system-settings/request-policies'
-import { POLICY_SECTION_IDS } from '@/features/system-settings/request-policies/section-registry'
+import {
+  POLICY_DEFAULT_SECTION,
+  POLICY_SECTION_IDS,
+} from '@/features/system-settings/request-policies/section-registry'
+import { guardSectionParam } from '@/features/system-settings/utils/route-config'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/request-policies/$section'
 )({
   beforeLoad: ({ params }) => {
-    if (!(POLICY_SECTION_IDS as readonly string[]).includes(params.section)) {
-      throw redirect({
-        to: '/system-settings/request-policies/$section',
-        params: { section: 'routing' },
-        replace: true,
-      })
-    }
+    guardSectionParam(
+      params.section,
+      POLICY_SECTION_IDS,
+      POLICY_DEFAULT_SECTION,
+      '/system-settings/request-policies/$section',
+      { replace: true }
+    )
   },
   component: RequestPolicies,
 })

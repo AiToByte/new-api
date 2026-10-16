@@ -35,6 +35,57 @@ export function createSectionSearchSchema<TSectionId extends string>(
 }
 
 /**
+ * Options for guarding a `$section` path-param route.
+ */
+export type SectionParamGuardOptions = {
+  /** When true, invalid-section redirects replace the history entry */
+  replace?: boolean
+  /** Custom section validator (e.g. a registry type guard). Defaults to `sectionIds.includes`. */
+  isValidSection?: (section: string) => boolean
+}
+
+/**
+ * Guard a `$section` path-param route.
+ *
+ * Valid sections fall through; anything else redirects to `defaultSection`.
+ * Extra route logic (legacy section redirects, role guards, search cleanup)
+ * stays in the route's own `beforeLoad` around this call.
+ */
+export function guardSectionParam<TSectionId extends string>(
+  section: string,
+  sectionIds: readonly TSectionId[],
+  defaultSection: TSectionId,
+  to: string,
+  options?: SectionParamGuardOptions
+): void {
+  const isValid =
+    options?.isValidSection ??
+    ((value: string) => (sectionIds as readonly string[]).includes(value))
+  if (!isValid(section)) {
+    throw redirect({
+      to,
+      params: { section: defaultSection },
+      ...(options?.replace === true ? { replace: true as const } : {}),
+    })
+  }
+}
+
+/**
+ * Redirect an index route to its default section.
+ */
+export function redirectToDefaultSection<TSectionId extends string>(
+  defaultSection: TSectionId,
+  to: string,
+  options?: { replace?: boolean }
+): never {
+  throw redirect({
+    to,
+    params: { section: defaultSection },
+    ...(options?.replace === true ? { replace: true as const } : {}),
+  })
+}
+
+/**
  * Configuration for creating a settings route config
  */
 export type SettingsRouteConfigOptions<

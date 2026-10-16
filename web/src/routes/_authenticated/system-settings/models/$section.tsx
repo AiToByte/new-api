@@ -23,6 +23,7 @@ import {
   MODELS_DEFAULT_SECTION,
   MODELS_SECTION_IDS,
 } from '@/features/system-settings/models/section-registry.tsx'
+import { guardSectionParam } from '@/features/system-settings/utils/route-config'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/models/$section'
@@ -42,13 +43,12 @@ export const Route = createFileRoute(
         replace: true,
       })
     }
-    const validSections = MODELS_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/system-settings/models/$section',
-        params: { section: MODELS_DEFAULT_SECTION },
-      })
-    }
+    guardSectionParam(
+      params.section,
+      MODELS_SECTION_IDS,
+      MODELS_DEFAULT_SECTION,
+      '/system-settings/models/$section'
+    )
   },
   component: ModelSettings,
 })

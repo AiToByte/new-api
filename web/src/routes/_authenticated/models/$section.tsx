@@ -24,6 +24,7 @@ import {
   MODELS_SECTION_IDS,
   MODELS_DEFAULT_SECTION,
 } from '@/features/models/section-registry'
+import { guardSectionParam } from '@/features/system-settings/utils/route-config'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -58,13 +59,12 @@ export const Route = createFileRoute('/_authenticated/models/$section')({
       })
     }
 
-    const validSections = MODELS_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/models/$section',
-        params: { section: MODELS_DEFAULT_SECTION },
-      })
-    }
+    guardSectionParam(
+      params.section,
+      MODELS_SECTION_IDS,
+      MODELS_DEFAULT_SECTION,
+      '/models/$section'
+    )
   },
   validateSearch: modelsSearchSchema,
   component: Models,
