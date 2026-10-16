@@ -399,6 +399,67 @@ func TestReconcileQuotaCacheOnBootRecoversLostWindow(t *testing.T) {
 	}
 }
 
+// TestReconcileQuotaCacheOnBootAcceptsDbTrueRace 记录 db=true 直写授信的已知
+// 残留竞态并锁定其语义：IncreaseUserQuota(..., db=true) 先同步落库、再异步刷
+// 缓存；若崩溃恰落在两者之间（微秒级），Redis 落后数据库，对账仍以 Redis
+// 为准减账，该笔授信在两侧一致地消失。损失以单笔授信为界，每次调整有审计
+// 日志，可凭 TopUp/兑换记录重补（运维流程见 docs/production-checklist.md）。
+func TestReconcileQuotaCacheOnBootAcceptsDbTrueRace(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := openTopUpPaginationTestDB(t, dialect)
+			require.NoError(t, db.AutoMigrate(&Token{}, &User{}))
+			require.NoError(t, db.Exec("DELETE FROM tokens").Error)
+			require.NoError(t, db.Exec("DELETE FROM users").Error)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+
+			previousDB := DB
+			previousMainType := common.MainDatabaseType()
+			previousLogType := common.LogDatabaseType()
+			DB = db
+			dialectType := common.DatabaseTypeSQLite
+			if dialect == "mysql" {
+				dialectType = common.DatabaseTypeMySQL
+			}
+			if dialect == "postgres" {
+				dialectType = common.DatabaseTypePostgreSQL
+			}
+			common.SetDatabaseTypes(dialectType, dialectType)
+			initCol()
+			t.Cleanup(func() {
+				DB = previousDB
+				common.SetDatabaseTypes(previousMainType, previousLogType)
+				initCol()
+			})
+
+			truncateTables(t)
+			resetBatchUpdateTestState(t)
+			enableReconcileTestEnv(t)
+
+			user := createReserveTestUser(t, 1000)
+			_, err = GetUserCache(user.Id)
+			require.NoError(t, err)
+
+			// 模拟 db=true 崩溃：DB 已 +200，异步缓存刷新没来得及跑。
+			require.NoError(t, db.Exec("UPDATE users SET quota = quota + ? WHERE id = ?", 200, user.Id).Error)
+			assert.Equal(t, 1200, getUserQuotaFromDB(t, user.Id))
+
+			stats, err := ReconcileQuotaCacheOnBoot()
+			require.NoError(t, err)
+			assert.Equal(t, 1, stats.UsersAdjusted)
+			// 对账信任 Redis：DB 被拉回 1000，+200 授信一致消失，需凭业务记录重补。
+			assert.Equal(t, 1000, getUserQuotaFromDB(t, user.Id))
+
+			// 已对平后再次对账必须是空操作。
+			stats, err = ReconcileQuotaCacheOnBoot()
+			require.NoError(t, err)
+			assert.Zero(t, stats.UsersAdjusted)
+		})
+	}
+}
+
 // TestReconcileQuotaCacheOnBootSkipsFencedKeys fence 生效中的键正在变更，
 // 跳过（下一轮定时刷会收敛），绝不能按过期快照回写。
 func TestReconcileQuotaCacheOnBootSkipsFencedKeys(t *testing.T) {

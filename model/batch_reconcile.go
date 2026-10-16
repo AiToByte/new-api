@@ -27,9 +27,14 @@ type QuotaReconcileStats struct {
 //  1. 正常路径下 Redis 永远领先数据库半步：预扣走 Lua 原子减，DB 靠
 //     批量刷盘追赶；充值同样先记 Redis（异步）再进批量队列。所以
 //     diff = redis - db 恒为“丢失窗口”，符号可正可负，直接应用。
-//  2. 已知残留 race：db=true 的直写路径是“先落库、异步刷缓存”，若恰在
-//     两者之间崩溃，对账会误减一笔。窗口仅微秒级、金额以单笔为界，
-//     每次调整都打审计日志，可事后核对。
+//  2. 已知残留 race（已接受，语义由
+//     TestReconcileQuotaCacheOnBootAcceptsDbTrueRace 锁定）：db=true 的直写
+//     授信（IncreaseUserQuota(..., true)：签到/邀请/充值）是“先同步落库、
+//     再异步刷缓存”，若恰在两者之间崩溃，Redis 落后数据库，对账按“Redis
+//     为准”减账，该笔授信在两侧一致地消失。方向不对称：DecreaseUserQuota
+//     先刷缓存后落库，同窗口崩溃反而收敛正确，只有授信方向会丢。窗口仅
+//     微秒级、损失以单笔授信为界；每次调整打审计日志，凭 TopUp/兑换记录
+//     可重补（运维流程见 docs/production-checklist.md）。
 //  3. fence 生效中的键一律跳过（正有变更在途），下一轮定时刷会收敛它。
 //  4. 用户 used_quota/request_count 与渠道 used_quota 在 Redis 没有真相
 //     来源（仅批量内存），崩溃即永久丢失——它们是统计口径，接受漂移，

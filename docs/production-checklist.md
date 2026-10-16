@@ -11,6 +11,7 @@
 - [ ] **批量结算开**：`BATCH_UPDATE_ENABLED=true`（实测 3.6x 吞吐 / P95 ÷5.3）。注意：无 Redis 时批量窗口内可超批，生产必须配下一条。
 - [ ] **Redis 开**：`REDIS_CONN_STRING` 配好并连通（实测再砍一半延迟至 P95 287ms；预扣走 Lua 精确账）。
 - [ ] **审计日志开**：`LogConsumeEnabled=true`（关掉快 55ms，但丢资金审计链；压测后必须恢复，默认即开）。
+- [ ] **非正常重启后查对账日志**：搜 `quota reconcile:`。`remain/used/quota %+d` 是补回崩溃丢失的批量窗口，正常。若崩溃恰在直写授信（签到/邀请/充值）的“落库后、刷缓存前”微秒窗口，对账会减掉该笔（两侧一致消失，凭 TopUp/兑换记录重补）。方向不对称：只有授信会丢，扣减方向自愈。根因与接受依据见 `model/batch_reconcile.go` 设计依据 #2。
 - [ ] **Pprof 关**：生产环境不得设 `ENABLE_PPROF=true`（压测实例专用）。
 - [ ] **Secrets 全换**：`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`SESSION_SECRET`（64+ 随机）、`SESSION_COOKIE_SECURE=true` + `SESSION_COOKIE_TRUSTED_URL` 精确公网 origin。`docker-compose.prod.yml` 用 `${VAR:?}` 强制拦截空值。
 - [ ] **备份**：`pg_dump` 定时 + `pg_data` 卷快照；恢复演练至少做过一次。日志量大时把 `LOG_SQL_DSN` 拆到独立库/ClickHouse。
