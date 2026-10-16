@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import { AreaChart, BarChart3, WalletCards } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,10 +35,10 @@ import type {
 } from '@/features/dashboard/types'
 import { useThemeRadiusPx } from '@/lib/theme-radius'
 import type { TimeGranularity } from '@/lib/time'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
 > | null = null
 
 interface ConsumptionDistributionChartProps {
@@ -71,7 +71,8 @@ export function ConsumptionDistributionChart(
   )
   const [themeReady, setThemeReady] = useState(false)
   const themeManagerRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    | (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
+    | null
   >(null)
   const timeGranularity = props.timeGranularity ?? DEFAULT_TIME_GRANULARITY
 
@@ -84,9 +85,10 @@ export function ConsumptionDistributionChart(
       setThemeReady(false)
 
       if (!themeManagerPromise) {
-        themeManagerPromise = import('@visactor/vchart').then(
-          (m) => m.ThemeManager
-        )
+        themeManagerPromise =
+          import('@visactor/vchart/esm/theme/theme-manager').then(
+            (m) => m.ThemeManager
+          )
       }
 
       const ThemeManager = await themeManagerPromise
@@ -156,14 +158,14 @@ export function ConsumptionDistributionChart(
 
       <div className='h-[300px] p-1.5 sm:h-96 sm:p-2'>
         {themeReady && spec && (
-          <VChart
+          <VChartSimple
+            vchartConstructor={RegisteredVChart}
             key={chartKey}
-            spec={{
-              ...spec,
-              theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-              background: 'transparent',
-            }}
-            option={VCHART_OPTION}
+            spec={withChartChrome(
+              spec,
+              resolvedTheme === 'dark' ? 'dark' : 'light'
+            )}
+            options={VCHART_OPTION}
           />
         )}
       </div>

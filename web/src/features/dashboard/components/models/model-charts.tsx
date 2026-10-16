@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import { PieChart as PieChartIcon } from 'lucide-react'
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,10 +35,10 @@ import type {
 } from '@/features/dashboard/types'
 import { useThemeRadiusPx } from '@/lib/theme-radius'
 import type { TimeGranularity } from '@/lib/time'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
 > | null = null
 
 type ChartSpecKey = 'spec_model_line' | 'spec_pie' | 'spec_rank_bar'
@@ -69,7 +69,8 @@ export function ModelCharts(props: ModelChartsProps) {
   )
   const [themeReady, setThemeReady] = useState(false)
   const themeManagerRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    | (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
+    | null
   >(null)
   const timeGranularity = props.timeGranularity ?? DEFAULT_TIME_GRANULARITY
 
@@ -82,9 +83,10 @@ export function ModelCharts(props: ModelChartsProps) {
       setThemeReady(false)
 
       if (!themeManagerPromise) {
-        themeManagerPromise = import('@visactor/vchart').then(
-          (m) => m.ThemeManager
-        )
+        themeManagerPromise =
+          import('@visactor/vchart/esm/theme/theme-manager').then(
+            (m) => m.ThemeManager
+          )
       }
 
       const ThemeManager = await themeManagerPromise
@@ -153,14 +155,14 @@ export function ModelCharts(props: ModelChartsProps) {
 
       <div className='h-[300px] p-1.5 sm:h-96 sm:p-2'>
         {themeReady && spec && (
-          <VChart
+          <VChartSimple
+            vchartConstructor={RegisteredVChart}
             key={chartKey}
-            spec={{
-              ...spec,
-              theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-              background: 'transparent',
-            }}
-            option={VCHART_OPTION}
+            spec={withChartChrome(
+              spec,
+              resolvedTheme === 'dark' ? 'dark' : 'light'
+            )}
+            options={VCHART_OPTION}
           />
         )}
       </div>

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,7 +25,7 @@ import { getSuccessRateColor } from '@/features/performance-metrics/lib/format'
 import { useThemeRadiusPx } from '@/lib/theme-radius'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { cn } from '@/lib/utils'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
 import type { LatencyTimePoint, UptimeDayPoint } from '../lib/mock-stats'
 
@@ -173,14 +173,14 @@ export function LatencyTrendChart(props: {
   return (
     <div className={cn('h-64 sm:h-72', props.className)}>
       {themeReady && spec && (
-        <VChart
+        <VChartSimple
+          vchartConstructor={RegisteredVChart}
           key={`latency-${resolvedTheme}`}
-          spec={{
-            ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-            background: 'transparent',
-          }}
-          option={VCHART_OPTION}
+          spec={withChartChrome(
+            spec,
+            resolvedTheme === 'dark' ? 'dark' : 'light'
+          )}
+          options={VCHART_OPTION}
         />
       )}
     </div>
@@ -301,14 +301,14 @@ export function UptimeTrendChart(props: {
   return (
     <div className={cn('h-56 sm:h-64', props.className)}>
       {themeReady && spec && (
-        <VChart
+        <VChartSimple
+          vchartConstructor={RegisteredVChart}
           key={`uptime-trend-${resolvedTheme}`}
-          spec={{
-            ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-            background: 'transparent',
-          }}
-          option={VCHART_OPTION}
+          spec={withChartChrome(
+            spec,
+            resolvedTheme === 'dark' ? 'dark' : 'light'
+          )}
+          options={VCHART_OPTION}
         />
       )}
     </div>
@@ -394,14 +394,14 @@ export function ThroughputBarChart(props: {
   return (
     <div className={cn('h-48 sm:h-56', props.className)}>
       {themeReady && spec && (
-        <VChart
+        <VChartSimple
+          vchartConstructor={RegisteredVChart}
           key={`tput-${resolvedTheme}`}
-          spec={{
-            ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-            background: 'transparent',
-          }}
-          option={VCHART_OPTION}
+          spec={withChartChrome(
+            spec,
+            resolvedTheme === 'dark' ? 'dark' : 'light'
+          )}
+          options={VCHART_OPTION}
         />
       )}
     </div>

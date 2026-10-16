@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import { Users, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -42,10 +42,10 @@ import type {
 } from '@/features/dashboard/types'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
 > | null = null
 
 const USER_CHARTS: {
@@ -77,7 +77,8 @@ export function UserCharts(props: UserChartsProps) {
   const { resolvedTheme } = useTheme()
   const [themeReady, setThemeReady] = useState(false)
   const themeManagerRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    | (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
+    | null
   >(null)
 
   // The selection is owned by the dashboard parent so it persists across
@@ -125,9 +126,10 @@ export function UserCharts(props: UserChartsProps) {
     const updateTheme = async () => {
       setThemeReady(false)
       if (!themeManagerPromise) {
-        themeManagerPromise = import('@visactor/vchart').then(
-          (m) => m.ThemeManager
-        )
+        themeManagerPromise =
+          import('@visactor/vchart/esm/theme/theme-manager').then(
+            (m) => m.ThemeManager
+          )
       }
       const ThemeManager = await themeManagerPromise
       themeManagerRef.current = ThemeManager
@@ -245,14 +247,14 @@ export function UserCharts(props: UserChartsProps) {
                 ) : (
                   themeReady &&
                   spec && (
-                    <VChart
+                    <VChartSimple
+                      vchartConstructor={RegisteredVChart}
                       key={`user-${chart.value}-${topUserLimit}-${resolvedTheme}`}
-                      spec={{
-                        ...spec,
-                        theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-                        background: 'transparent',
-                      }}
-                      option={VCHART_OPTION}
+                      spec={withChartChrome(
+                        spec,
+                        resolvedTheme === 'dark' ? 'dark' : 'light'
+                      )}
+                      options={VCHART_OPTION}
                     />
                   )
                 )}

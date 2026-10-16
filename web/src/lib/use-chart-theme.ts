@@ -26,14 +26,15 @@ import { useTheme } from '@/context/theme-provider'
  * defer chart rendering until the theme is ready.
  */
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
 > | null = null
 
 export function useChartTheme() {
   const { resolvedTheme } = useTheme()
   const [themeReady, setThemeReady] = useState(false)
   const themeRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    | (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
+    | null
   >(null)
 
   useEffect(() => {
@@ -41,9 +42,10 @@ export function useChartTheme() {
     const updateTheme = async () => {
       setThemeReady(false)
       if (!themeManagerPromise) {
-        themeManagerPromise = import('@visactor/vchart').then(
-          (m) => m.ThemeManager
-        )
+        themeManagerPromise =
+          import('@visactor/vchart/esm/theme/theme-manager').then(
+            (m) => m.ThemeManager
+          )
       }
       const ThemeManager = await themeManagerPromise
       if (cancelled) return

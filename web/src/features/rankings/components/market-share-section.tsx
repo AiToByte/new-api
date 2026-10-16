@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import { PieChart } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useChartTheme } from '@/lib/use-chart-theme'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
 import { formatShare, formatTokens } from '../lib/format'
 import type { RankingPeriod, VendorRanking, VendorShareSeries } from '../types'
@@ -227,14 +227,14 @@ export function MarketShareSection(props: MarketShareSectionProps) {
       <div className='px-5 pb-5'>
         <div className='h-60 sm:h-72'>
           {themeReady && spec ? (
-            <VChart
+            <VChartSimple
+              vchartConstructor={RegisteredVChart}
               key={`vendor-share-${resolvedTheme}-${props.period}`}
-              spec={{
-                ...spec,
-                theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-                background: 'transparent',
-              }}
-              option={VCHART_OPTION}
+              spec={withChartChrome(
+                spec,
+                resolvedTheme === 'dark' ? 'dark' : 'light'
+              )}
+              options={VCHART_OPTION}
             />
           ) : (
             <div className='text-muted-foreground/80 flex h-full items-center justify-center text-xs'>

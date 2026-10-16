@@ -42,7 +42,9 @@ import {
 } from '../lib/task-price-display'
 import type { PricingModel, BillingUsageSchema } from '../types'
 
-vi.mock('@visactor/react-vchart', () => ({ VChart: () => null }))
+vi.mock('@visactor/react-vchart/esm/VChartSimple', () => ({
+  VChartSimple: () => null,
+}))
 
 it('shows an explicit free request price alongside token prices with distinct units', () => {
   render(

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { VChart } from '@visactor/react-vchart'
+import { VChartSimple } from '@visactor/react-vchart/esm/VChartSimple'
 import type { EventParamsDefinition, IVChart } from '@visactor/vchart'
 import {
   Activity,
@@ -90,7 +90,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { computeTimeRange } from '@/lib/time'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { cn } from '@/lib/utils'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { FlowNodeFilterControl } from './flow-node-filter'
@@ -492,14 +492,11 @@ export function FlowCharts(props: FlowChartsProps) {
       ? flowError.message
       : t('Please try again later.')
   let chartContent = (
-    <VChart
+    <VChartSimple
+      vchartConstructor={RegisteredVChart}
       key={`flow-${chartKey}`}
-      spec={{
-        ...flowSpec,
-        theme: chartTheme,
-        background: 'transparent',
-      }}
-      option={VCHART_OPTION}
+      spec={withChartChrome(flowSpec, chartTheme)}
+      options={VCHART_OPTION}
       onReady={(instance: IVChart) => {
         chartInstanceRef.current = instance
       }}

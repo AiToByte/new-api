@@ -32,7 +32,9 @@ const chart = vi.hoisted(() =>
     }) => null
   )
 )
-vi.mock('@visactor/react-vchart', () => ({ VChart: chart }))
+vi.mock('@visactor/react-vchart/esm/VChartSimple', () => ({
+  VChartSimple: chart,
+}))
 vi.mock('@visactor/vchart', () => ({
   ThemeManager: { setCurrentTheme: vi.fn() },
 }))
