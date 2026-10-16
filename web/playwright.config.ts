@@ -32,10 +32,23 @@ export default defineConfig({
     baseURL: 'http://localhost:3100',
     trace: 'retain-on-failure',
   },
-  webServer: {
-    command: 'bun run dev -- --port 3100',
-    url: 'http://localhost:3100',
-    reuseExistingServer: true,
-    timeout: 180000,
-  },
+  webServer: [
+    {
+      command: 'bun run dev -- --port 3100',
+      url: 'http://localhost:3100',
+      reuseExistingServer: true,
+      timeout: 180000,
+    },
+    {
+      // Captcha specs run against the scratch PG backend (:3002), never
+      // production (:3000). CaptchaEnabled is toggled on that instance only.
+      command: 'bun run dev -- --port 3101',
+      url: 'http://localhost:3101',
+      reuseExistingServer: true,
+      timeout: 180000,
+      env: {
+        VITE_REACT_APP_SERVER_URL: 'http://localhost:3002',
+      },
+    },
+  ],
 })
