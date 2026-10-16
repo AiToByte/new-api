@@ -42,6 +42,10 @@ import { Label } from '@/components/ui/label'
 import { login, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
+import {
+  SliderCaptcha,
+  type CaptchaProof,
+} from '@/features/auth/components/slider-captcha'
 import { loginFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
@@ -80,6 +84,8 @@ export function UserAuthForm({
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
+  const [captchaWidgetKey, setCaptchaWidgetKey] = useState(0)
+  const [captchaProof, setCaptchaProof] = useState<CaptchaProof | null>(null)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
   const loginFailedMessage = t('Login failed')
 
@@ -102,6 +108,8 @@ export function UserAuthForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
+  const isCaptchaEnabled =
+    (status?.captcha_enabled ?? status?.data?.captcha_enabled ?? true) !== false
   const { handleLoginResult } = useAuthRedirect()
 
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
@@ -167,6 +175,16 @@ export function UserAuthForm({
 
     if (!validateTurnstile()) return
 
+    if (isCaptchaEnabled) {
+      if (
+        !captchaProof ||
+        (captchaProof.kind === 'text' && !captchaProof.code.trim())
+      ) {
+        toast.error(t('Please complete the image captcha'))
+        return
+      }
+    }
+
     const submittedTurnstileToken = turnstileToken
     if (isTurnstileEnabled) {
       setTurnstileToken('')
@@ -179,6 +197,16 @@ export function UserAuthForm({
         username: data.username,
         password: data.password,
         turnstile: submittedTurnstileToken,
+        captcha_id: captchaProof?.kind === 'text' ? captchaProof.id : undefined,
+        captcha_code:
+          captchaProof?.kind === 'text' ? captchaProof.code.trim() : undefined,
+        slide_id: captchaProof?.kind === 'slide' ? captchaProof.id : undefined,
+        slide_x:
+          captchaProof?.kind === 'slide' ? String(captchaProof.x) : undefined,
+        slide_y:
+          captchaProof?.kind === 'slide' ? String(captchaProof.y) : undefined,
+        slide_trail:
+          captchaProof?.kind === 'slide' ? captchaProof.trail : undefined,
         passwordEncryptionEnabled: passwordLoginEncryptionEnabled,
       })
 
@@ -188,9 +216,11 @@ export function UserAuthForm({
           toast.success(t('Welcome back!'))
         }
       } else {
+        setCaptchaWidgetKey((current) => current + 1)
         handleServerError(createServerError(res, loginFailedMessage))
       }
     } catch (error: unknown) {
+      setCaptchaWidgetKey((current) => current + 1)
       handleServerError(AuthOperationError.from(error, loginFailedMessage))
     } finally {
       setIsLoading(false)
@@ -394,6 +424,18 @@ export function UserAuthForm({
                 </FormItem>
               )}
             />
+
+            {/* Captcha */}
+            {isCaptchaEnabled && (
+              <div className='mt-2'>
+                <SliderCaptcha
+                  key={captchaWidgetKey}
+                  value={captchaProof}
+                  onChange={setCaptchaProof}
+                  disabled={isLoading}
+                />
+              </div>
+            )}
 
             {/* Submit Button */}
             <Button

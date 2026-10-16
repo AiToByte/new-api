@@ -41,6 +41,10 @@ import { Label } from '@/components/ui/label'
 import { register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
+import {
+  SliderCaptcha,
+  type CaptchaProof,
+} from '@/features/auth/components/slider-captcha'
 import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
@@ -67,6 +71,8 @@ export function SignUpForm({
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
+  const [captchaWidgetKey, setCaptchaWidgetKey] = useState(0)
+  const [captchaProof, setCaptchaProof] = useState<CaptchaProof | null>(null)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
 
   const { status } = useStatus()
@@ -100,6 +106,8 @@ export function SignUpForm({
 
   const emailValue = form.watch('email')
   const emailVerificationRequired = !!status?.email_verification
+  const isCaptchaEnabled =
+    (status?.captcha_enabled ?? status?.data?.captcha_enabled ?? true) !== false
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
   const requiresLegalConsent = hasUserAgreement || hasPrivacyPolicy
@@ -159,6 +167,16 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    if (isCaptchaEnabled) {
+      if (
+        !captchaProof ||
+        (captchaProof.kind === 'text' && !captchaProof.code.trim())
+      ) {
+        toast.error(t('Please complete the image captcha'))
+        return
+      }
+    }
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -168,15 +186,27 @@ export function SignUpForm({
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
         turnstile: turnstileToken,
+        captcha_id: captchaProof?.kind === 'text' ? captchaProof.id : undefined,
+        captcha_code:
+          captchaProof?.kind === 'text' ? captchaProof.code.trim() : undefined,
+        slide_id: captchaProof?.kind === 'slide' ? captchaProof.id : undefined,
+        slide_x:
+          captchaProof?.kind === 'slide' ? String(captchaProof.x) : undefined,
+        slide_y:
+          captchaProof?.kind === 'slide' ? String(captchaProof.y) : undefined,
+        slide_trail:
+          captchaProof?.kind === 'slide' ? captchaProof.trail : undefined,
       })
 
       if (res?.success) {
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
       } else {
+        setCaptchaWidgetKey((current) => current + 1)
         handleServerError(createServerError(res, t('Failed to create account')))
       }
     } catch (error) {
+      setCaptchaWidgetKey((current) => current + 1)
       handleServerError(
         AuthOperationError.from(error, t('Failed to create account'))
       )
@@ -348,6 +378,18 @@ export function SignUpForm({
               </Button>
             </div>
           </>
+        )}
+
+        {/* Captcha */}
+        {isCaptchaEnabled && (
+          <div className='mt-2'>
+            <SliderCaptcha
+              key={captchaWidgetKey}
+              value={captchaProof}
+              onChange={setCaptchaProof}
+              disabled={isLoading}
+            />
+          </div>
         )}
 
         {/* Turnstile */}

@@ -53,6 +53,8 @@ import type {
 // User login with username and password
 export async function login(payload: LoginPayload): Promise<LoginResponse> {
   const turnstile = payload.turnstile ?? ''
+  const captchaId = payload.captcha_id ?? ''
+  const captchaCode = payload.captcha_code ?? ''
   try {
     let passwordFields:
       | { password: string }
@@ -67,12 +69,23 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
       passwordFields = { password: payload.password }
     }
     const res = await api.post<LoginResponse>(
-      `/api/user/login?turnstile=${turnstile}`,
+      `/api/user/login`,
       {
         username: payload.username,
         ...passwordFields,
       },
-      { skipAuthRefresh: true }
+      {
+        params: {
+          turnstile,
+          captcha_id: captchaId,
+          captcha_code: captchaCode,
+          slide_id: payload.slide_id ?? '',
+          slide_x: payload.slide_x ?? '',
+          slide_y: payload.slide_y ?? '',
+          slide_trail: payload.slide_trail ?? '',
+        },
+        skipAuthRefresh: true,
+      }
     )
     if (payload.passwordEncryptionEnabled && !res.data?.success) {
       clearPasswordEncryptionCache()
@@ -249,9 +262,72 @@ export async function telegramLogin(
 // User registration
 export async function register(payload: RegisterPayload): Promise<ApiResponse> {
   const res = await api.post(`/api/user/register`, payload, {
-    params: { turnstile: payload.turnstile ?? '' },
+    params: {
+      turnstile: payload.turnstile ?? '',
+      captcha_id: payload.captcha_id ?? '',
+      captcha_code: payload.captcha_code ?? '',
+      slide_id: payload.slide_id ?? '',
+      slide_x: payload.slide_x ?? '',
+      slide_y: payload.slide_y ?? '',
+      slide_trail: payload.slide_trail ?? '',
+    },
   })
   return res.data
+}
+
+// Fetch a single-use image captcha challenge for login/registration forms
+export interface ImageCaptchaChallenge {
+  captcha_id: string
+  image: string
+  expires_in: number
+}
+
+export async function fetchImageCaptcha(): Promise<ImageCaptchaChallenge> {
+  const res = await api.get<ApiResponse<ImageCaptchaChallenge>>(
+    '/api/user/captcha',
+    { skipAuthRefresh: true }
+  )
+  if (
+    !res.data?.success ||
+    !res.data.data?.captcha_id ||
+    !res.data.data?.image
+  ) {
+    throw new AuthOperationError(
+      getServerMessage(res.data) || 'Failed to load image captcha'
+    )
+  }
+  return res.data.data
+}
+
+// Fetch a single-use jigsaw challenge for login/registration forms
+export interface SlideCaptchaChallenge {
+  slide_id: string
+  master_image: string
+  tile_image: string
+  tile_y: number
+  tile_width: number
+  tile_height: number
+  image_width: number
+  image_height: number
+  expires_in: number
+}
+
+export async function fetchSlideCaptcha(): Promise<SlideCaptchaChallenge> {
+  const res = await api.get<ApiResponse<SlideCaptchaChallenge>>(
+    '/api/user/captcha/slide',
+    { skipAuthRefresh: true }
+  )
+  if (
+    !res.data?.success ||
+    !res.data.data?.slide_id ||
+    !res.data.data?.master_image ||
+    !res.data.data?.tile_image
+  ) {
+    throw new AuthOperationError(
+      getServerMessage(res.data) || 'Failed to load image captcha'
+    )
+  }
+  return res.data.data
 }
 
 // Send email verification code
