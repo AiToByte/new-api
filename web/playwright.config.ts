@@ -39,11 +39,10 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 180000,
       // CI points the whole harness at its scratch backend; locally this
-      // stays unset and the dev default (production :3000 proxy) applies.
+      // equals the dev default (production :3000 proxy).
       env: {
-        ...(process.env.E2E_API_URL
-          ? { VITE_REACT_APP_SERVER_URL: process.env.E2E_API_URL }
-          : {}),
+        VITE_REACT_APP_SERVER_URL:
+          process.env.E2E_API_URL ?? 'http://localhost:3000',
       },
     },
     {
