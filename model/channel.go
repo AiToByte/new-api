@@ -163,6 +163,30 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 	return query.Where(channelGroupFilterCondition(), channelGroupFilterPattern(group))
 }
 
+// NewChannelListQuery builds the base channel listing query: group scoping,
+// status filter (-1 all, 1 enabled, 0 disabled including auto & manual) and an
+// optional type filter (negative disables it). Callers add pagination,
+// sorting and projection on top.
+func NewChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
+	query := DB.Model(&Channel{})
+	query = ApplyChannelGroupFilter(query, group)
+	query = applyChannelStatusFilter(query, statusFilter)
+	if typeFilter >= 0 {
+		query = query.Where("type = ?", typeFilter)
+	}
+	return query
+}
+
+func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
+	if statusFilter == common.ChannelStatusEnabled {
+		return query.Where("status = ?", common.ChannelStatusEnabled)
+	}
+	if statusFilter == 0 {
+		return query.Where("status != ?", common.ChannelStatusEnabled)
+	}
+	return query
+}
+
 // Value implements driver.Valuer interface
 // 必须返回 string 而非 []byte:PG simple protocol 下 []byte 参数按 bytea
 // 编码,写 json 列会触发 SQLSTATE 22P02。
@@ -733,6 +757,16 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 		}
 	}
 	return false
+}
+
+// HasEnabledMultiKey reports whether the channel still has at least one
+// enabled key. Nil channels, non-multi-key channels and channels without a
+// status list count as enabled; an empty key list counts as disabled.
+func (c *Channel) HasEnabledMultiKey() bool {
+	if c == nil || !c.ChannelInfo.IsMultiKey {
+		return true
+	}
+	return hasEnabledMultiKey(c.GetKeys(), c.ChannelInfo.MultiKeyStatusList)
 }
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {

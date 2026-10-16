@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import { Bell, Megaphone } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { RichContent } from '@/components/rich-content'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,10 +39,17 @@ import {
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
+
+const LazyRichContent = lazy(() =>
+  import('@/components/rich-content').then((module) => ({
+    default: module.RichContent,
+  }))
+)
 
 interface AnnouncementItem {
   id?: number | string
@@ -205,7 +212,9 @@ function NoticeContent({
 
   return (
     <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
-      <RichContent breaks content={notice} />
+      <Suspense fallback={<Skeleton className='h-24 w-full' />}>
+        <LazyRichContent breaks content={notice} />
+      </Suspense>
     </ScrollArea>
   )
 }
@@ -260,12 +269,18 @@ function AnnouncementsContent({
                   <AnnouncementDot type={item.type} />
                   <div className='flex min-w-0 flex-1 flex-col gap-2'>
                     <div className='text-sm'>
-                      <RichContent breaks content={item.content || ''} />
+                      <Suspense fallback={<Skeleton className='h-16 w-full' />}>
+                        <LazyRichContent breaks content={item.content || ''} />
+                      </Suspense>
                     </div>
 
                     {item.extra ? (
                       <div className='text-muted-foreground text-xs'>
-                        <RichContent breaks content={item.extra} />
+                        <Suspense
+                          fallback={<Skeleton className='h-8 w-full' />}
+                        >
+                          <LazyRichContent breaks content={item.extra} />
+                        </Suspense>
                       </div>
                     ) : null}
 

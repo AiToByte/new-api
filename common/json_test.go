@@ -234,3 +234,54 @@ func TestHostJSONCodecConformance(t *testing.T) {
 		assert.JSONEq(t, gjson.GetBytes(raw, "messages.1.tool_calls").Raw, messages[1].Get("tool_calls").Raw)
 	})
 }
+
+var benchChatCompletion2K = []byte(`{"id":"chatcmpl-abc123","object":"chat.completion","created":1792054661,"model":"mock-gpt","choices":[{"index":0,"message":{"role":"assistant","content":"Pong! How can I help you today? This is a representative mid-size relay payload with enough text to resemble production traffic."},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":28,"total_tokens":40}}`)
+
+func benchLargeCompletion128K() []byte {
+	var sb strings.Builder
+	sb.WriteString(`{"id":"chatcmpl-big","object":"chat.completion","created":1792054661,"model":"mock-gpt","choices":[`)
+	for i := 0; i < 64; i++ {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(`{"index":0,"message":{"role":"assistant","content":"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. "},"finish_reason":"stop"}`)
+	}
+	sb.WriteString(`],"usage":{"prompt_tokens":1200,"completion_tokens":2800,"total_tokens":4000}}`)
+	return []byte(sb.String())
+}
+
+func BenchmarkUnmarshalChatCompletion2K(b *testing.B) {
+	b.ReportAllocs()
+	for range b.N {
+		var resp dto.OpenAITextResponse
+		if err := Unmarshal(benchChatCompletion2K, &resp); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshalChatCompletion2K(b *testing.B) {
+	var resp dto.OpenAITextResponse
+	if err := Unmarshal(benchChatCompletion2K, &resp); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := Marshal(resp); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalChatCompletion128K(b *testing.B) {
+	raw := benchLargeCompletion128K()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		var resp dto.OpenAITextResponse
+		if err := Unmarshal(raw, &resp); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

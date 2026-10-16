@@ -87,27 +87,8 @@ func closeActiveChannelWebSockets(channelIDs []int) {
 	service.CloseActiveWebSocketsForChannels(channelIDs, service.ChannelDisabledCloseReason)
 }
 
-func hasEnabledMultiKey(channel *model.Channel) bool {
-	if channel == nil || !channel.ChannelInfo.IsMultiKey {
-		return true
-	}
-	keys := channel.GetKeys()
-	if len(keys) == 0 {
-		return false
-	}
-	for i := range keys {
-		if channel.ChannelInfo.MultiKeyStatusList == nil {
-			return true
-		}
-		if status, ok := channel.ChannelInfo.MultiKeyStatusList[i]; !ok || status == common.ChannelStatusEnabled {
-			return true
-		}
-	}
-	return false
-}
-
 func disableMultiKeyChannelIfUnavailable(channel *model.Channel) bool {
-	if channel == nil || !channel.ChannelInfo.IsMultiKey || hasEnabledMultiKey(channel) {
+	if channel == nil || !channel.ChannelInfo.IsMultiKey || channel.HasEnabledMultiKey() {
 		return false
 	}
 	if channel.Status != common.ChannelStatusEnabled {
@@ -122,7 +103,7 @@ func disableMultiKeyChannelIfUnavailable(channel *model.Channel) bool {
 }
 
 func restoreMultiKeyChannelIfAvailable(channel *model.Channel) {
-	if channel.Status != common.ChannelStatusManuallyDisabled || !hasEnabledMultiKey(channel) {
+	if channel.Status != common.ChannelStatusManuallyDisabled || !channel.HasEnabledMultiKey() {
 		return
 	}
 	info := channel.GetOtherInfo()
@@ -133,26 +114,6 @@ func restoreMultiKeyChannelIfAvailable(channel *model.Channel) {
 	info["status_reason"] = ""
 	info["status_time"] = common.GetTimestamp()
 	channel.SetOtherInfo(info)
-}
-
-func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
-	if statusFilter == common.ChannelStatusEnabled {
-		return query.Where("status = ?", common.ChannelStatusEnabled)
-	}
-	if statusFilter == 0 {
-		return query.Where("status != ?", common.ChannelStatusEnabled)
-	}
-	return query
-}
-
-func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
-	query := model.DB.Model(&model.Channel{})
-	query = model.ApplyChannelGroupFilter(query, group)
-	query = applyChannelStatusFilter(query, statusFilter)
-	if typeFilter >= 0 {
-		query = query.Where("type = ?", typeFilter)
-	}
-	return query
 }
 
 func GetChannelOps(c *gin.Context) {
@@ -210,13 +171,13 @@ func GetAllChannels(c *gin.Context) {
 	var total int64
 
 	if enableTagMode {
-		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedChannelTags(model.NewChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
 			common.SysError(common.LogText("failed to get paginated tags: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to fetch tags. Please try again later")
 			return
 		}
-		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter))
+		total, err = model.CountChannelTags(model.NewChannelListQuery(groupFilter, statusFilter, typeFilter))
 		if err != nil {
 			common.SysError(common.LogText("failed to count tags: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to count tags. Please try again later")
@@ -227,7 +188,7 @@ func GetAllChannels(c *gin.Context) {
 				continue
 			}
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(model.NewChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -238,13 +199,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 	} else {
-		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
+		if err := model.NewChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
 			common.SysError(common.LogText("failed to count channels: %s", err.Error()))
 			common.ApiErrorT(c, "Failed to count channels. Please try again later")
 			return
 		}
 
-		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
+		err := sortOptions.Apply(model.NewChannelListQuery(groupFilter, statusFilter, typeFilter)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
 			Omit("key").
@@ -260,7 +221,7 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
+	countQuery := model.NewChannelListQuery(groupFilter, statusFilter, -1)
 	var results []struct {
 		Type  int64
 		Count int64
@@ -337,11 +298,7 @@ func FetchUpstreamModels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    ids,
-	})
+	common.ApiSuccess(c, ids)
 }
 
 func FixChannelsAbilities(c *gin.Context) {
@@ -350,13 +307,9 @@ func FixChannelsAbilities(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"success": success,
-			"fails":   fails,
-		},
+	common.ApiSuccess(c, gin.H{
+		"success": success,
+		"fails":   fails,
 	})
 }
 
@@ -376,17 +329,31 @@ func SearchChannels(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		tagNames := make([]string, 0, len(tags))
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
-				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
-					Omit("key").
-					Find(&tagChannels).Error
-				if err != nil {
-					common.ApiError(c, err)
-					return
+				tagNames = append(tagNames, *tag)
+			}
+		}
+		if len(tagNames) > 0 {
+			var tagChannels []*model.Channel
+			err := sortOptions.Apply(model.NewChannelListQuery(group, -1, -1).Where("tag IN ?", tagNames)).
+				Omit("key").
+				Find(&tagChannels).Error
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			// Restore the original per-tag grouping so the in-memory
+			// pagination below sees the same order as before.
+			grouped := make(map[string][]*model.Channel, len(tagNames))
+			for _, ch := range tagChannels {
+				if ch.Tag != nil {
+					grouped[*ch.Tag] = append(grouped[*ch.Tag], ch)
 				}
-				channelData = append(channelData, tagChannels...)
+			}
+			for _, name := range tagNames {
+				channelData = append(channelData, grouped[name]...)
 			}
 		}
 	} else {
@@ -455,14 +422,10 @@ func SearchChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"items":       pagedData,
-			"total":       total,
-			"type_counts": typeCounts,
-		},
+	common.ApiSuccess(c, gin.H{
+		"items":       pagedData,
+		"total":       total,
+		"type_counts": typeCounts,
 	})
 	return
 }
@@ -481,11 +444,7 @@ func GetChannel(c *gin.Context) {
 	if channel != nil {
 		clearChannelInfo(channel)
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    channel,
-	})
+	common.ApiSuccess(c, channel)
 	return
 }
 
@@ -896,11 +855,7 @@ func DeleteDisabledChannel(c *gin.Context) {
 		"count": rows,
 	})
 	closeActiveChannelWebSockets(ids)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    rows,
-	})
+	common.ApiSuccess(c, rows)
 	return
 }
 
@@ -1042,11 +997,7 @@ func DeleteChannelBatch(c *gin.Context) {
 		"count": deletedCount,
 	})
 	closeActiveChannelWebSockets(channelBatch.Ids)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    deletedCount,
-	})
+	common.ApiSuccess(c, deletedCount)
 	return
 }
 
@@ -1258,11 +1209,7 @@ func UpdateChannel(c *gin.Context) {
 	recordManageAudit(c, "channel.update", updateAudit)
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    channel,
-	})
+	common.ApiSuccess(c, channel)
 	return
 }
 
@@ -1289,11 +1236,7 @@ func UpdateChannelStatus(c *gin.Context) {
 		"status":  req.Status,
 		"changed": changed,
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    changed,
-	})
+	common.ApiSuccess(c, changed)
 }
 
 func BatchUpdateChannelStatus(c *gin.Context) {
@@ -1323,11 +1266,7 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 		"total":  len(req.Ids),
 		"status": req.Status,
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    changedCount,
-	})
+	common.ApiSuccess(c, changedCount)
 }
 
 func isManageableChannelStatus(status int) bool {
@@ -1467,11 +1406,7 @@ func FetchModels(c *gin.Context) {
 		common.ApiErrorT(c, "Failed to fetch models: {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    models,
-	})
+	common.ApiSuccess(c, models)
 }
 
 func BatchSetChannelTag(c *gin.Context) {
@@ -1490,11 +1425,7 @@ func BatchSetChannelTag(c *gin.Context) {
 	recordManageAudit(c, "channel.tag_batch_set", map[string]any{
 		"count": len(channelBatch.Ids),
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    len(channelBatch.Ids),
-	})
+	common.ApiSuccess(c, len(channelBatch.Ids))
 	return
 }
 
@@ -1528,11 +1459,7 @@ func GetTagModels(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    longestModels,
-	})
+	common.ApiSuccess(c, longestModels)
 	return
 }
 
@@ -1601,7 +1528,7 @@ func CopyChannel(c *gin.Context) {
 		"name":     clone.Name,
 	})
 	// success
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": clone.Id}})
+	common.ApiSuccess(c, gin.H{"id": clone.Id})
 }
 
 // MultiKeyManageRequest represents the request for multi-key management operations
@@ -1770,19 +1697,15 @@ func ManageMultiKeys(c *gin.Context) {
 			pageKeyStatusList = filteredKeyStatusList[start:end]
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data": MultiKeyStatusResponse{
-				Keys:                pageKeyStatusList,
-				Total:               filteredTotal, // Total of filtered results
-				Page:                page,
-				PageSize:            pageSize,
-				TotalPages:          totalPages,
-				EnabledCount:        enabledCount,        // Overall statistics
-				ManualDisabledCount: manualDisabledCount, // Overall statistics
-				AutoDisabledCount:   autoDisabledCount,   // Overall statistics
-			},
+		common.ApiSuccess(c, MultiKeyStatusResponse{
+			Keys:                pageKeyStatusList,
+			Total:               filteredTotal, // Total of filtered results
+			Page:                page,
+			PageSize:            pageSize,
+			TotalPages:          totalPages,
+			EnabledCount:        enabledCount,        // Overall statistics
+			ManualDisabledCount: manualDisabledCount, // Overall statistics
+			AutoDisabledCount:   autoDisabledCount,   // Overall statistics
 		})
 		return
 

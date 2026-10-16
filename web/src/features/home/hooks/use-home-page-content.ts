@@ -27,6 +27,10 @@ import type { HomePageContentResult } from '../types'
 
 const STORAGE_KEY = 'home_page_content'
 
+// Upper bound for the cached copy. Oversized admin content still renders
+// from memory; it is only skipped from the localStorage fast-path.
+const MAX_CACHED_HOME_CONTENT_CHARS = 1024 * 1024
+
 /**
  * Hook to load and manage custom home page content
  * Supports both Markdown/HTML content and iframe URLs
@@ -53,7 +57,14 @@ export function useHomePageContent(): HomePageContentResult {
 
         if (success && data) {
           setContent(data)
-          localStorage.setItem(STORAGE_KEY, data)
+          try {
+            if (data.length <= MAX_CACHED_HOME_CONTENT_CHARS) {
+              localStorage.setItem(STORAGE_KEY, data)
+            }
+          } catch {
+            // Storage full or unavailable: the cache is only a fast-path,
+            // the in-memory state above still renders the page.
+          }
         } else {
           // Clear content if API returns empty
           setContent('')
