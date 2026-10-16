@@ -36,7 +36,7 @@ test.each([
   }
 )
 
-test('an admin-configured Simple Icon still resolves through the lazy icon loader', async () => {
+test('an admin-configured Simple Icon still resolves through the curated icon set', async () => {
   render(
     getPaymentIcon(
       PAYMENT_TYPES.ALIPAY,
