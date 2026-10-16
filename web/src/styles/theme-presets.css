@@ -254,6 +254,45 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.623 0.188 259.81);
 }
 
+/* ── AiToByte ─────────────────────────────────────────────────────────── */
+/* Brand preset: Google-grade cobalt primary on Apple-grade neutrals, with a
+   single warm coral chart accent as a nod to Anthropic's warmth. */
+[data-theme-preset='aitobyte'] {
+  --primary: oklch(0.55 0.19 258);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.92 0.025 258);
+  --secondary-foreground: oklch(0.25 0.04 260);
+  --ring: oklch(0.55 0.19 258);
+  --chart-1: oklch(0.55 0.19 258);
+  --chart-2: oklch(0.7 0.13 250);
+  --chart-3: oklch(0.45 0.15 270);
+  --chart-4: oklch(0.82 0.08 240);
+  --chart-5: oklch(0.72 0.14 35);
+  --sidebar-primary: oklch(0.55 0.19 258);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.94 0.02 258);
+  --sidebar-accent-foreground: oklch(0.25 0.04 260);
+  --sidebar-ring: oklch(0.55 0.19 258);
+  --radius: 0.625rem;
+}
+.dark [data-theme-preset='aitobyte'] {
+  --primary: oklch(0.7 0.16 258);
+  --primary-foreground: oklch(0.16 0.035 260);
+  --secondary: oklch(0.28 0.05 260);
+  --secondary-foreground: oklch(0.92 0.02 258);
+  --ring: oklch(0.7 0.16 258);
+  --chart-1: oklch(0.7 0.16 258);
+  --chart-2: oklch(0.75 0.12 250);
+  --chart-3: oklch(0.6 0.16 270);
+  --chart-4: oklch(0.55 0.08 240);
+  --chart-5: oklch(0.72 0.14 35);
+  --sidebar-primary: oklch(0.7 0.16 258);
+  --sidebar-primary-foreground: oklch(0.16 0.035 260);
+  --sidebar-accent: oklch(0.22 0.04 260);
+  --sidebar-accent-foreground: oklch(0.92 0.02 258);
+  --sidebar-ring: oklch(0.7 0.16 258);
+}
+
 /* ── Lavender Dream ───────────────────────────────────────────────────── */
 [data-theme-preset='lavender-dream'] {
   --primary: oklch(0.5709 0.1808 306.89);

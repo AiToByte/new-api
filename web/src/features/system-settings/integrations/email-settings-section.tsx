@@ -348,7 +348,7 @@ export function EmailSettingsSection({
                 <FormControl>
                   <Input
                     autoComplete='off'
-                    placeholder={t('noreply@example.com')}
+                    placeholder={t('noreply@aitobyte.com')}
                     {...field}
                     onChange={(event) => field.onChange(event.target.value)}
                   />
@@ -370,7 +370,7 @@ export function EmailSettingsSection({
                 <FormControl>
                   <Input
                     autoComplete='off'
-                    placeholder={t('New API &lt;noreply@example.com&gt;')}
+                    placeholder={t('AiToByte &lt;noreply@aitobyte.com&gt;')}
                     {...field}
                     onChange={(event) => field.onChange(event.target.value)}
                   />

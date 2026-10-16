@@ -30,6 +30,13 @@ export const THEME_PRESETS = [
     swatches: ['oklch(0.72 0.18 250)', 'oklch(0.7 0.12 280)'],
   },
   {
+    // AiToByte brand preset, also the product default (see
+    // DEFAULT_THEME_CUSTOMIZATION below).
+    value: 'aitobyte',
+    name: 'AiToByte',
+    swatches: ['oklch(0.55 0.19 258)', 'oklch(0.82 0.08 240)'],
+  },
+  {
     // Inspired by Anthropic's official brand language: warm cream canvas
     // (#faf9f5) paired with clay/coral (#d97757) as the single accent.
     // Swatches preview the canvas → accent gradient that defines the system.
@@ -112,7 +119,7 @@ export type ThemeCustomization = {
 }
 
 export const DEFAULT_THEME_CUSTOMIZATION: ThemeCustomization = {
-  preset: 'default',
+  preset: 'aitobyte',
   font: 'default',
   radius: 'default',
   scale: 'default',

@@ -63,7 +63,7 @@ func getWaffoCurrency() string {
 func buildWaffoTopUpGoodsInfo(amount int64) *order.GoodsInfo {
 	appName := strings.TrimSpace(common.SystemName)
 	if appName == "" {
-		appName = "New API"
+		appName = "AiToByte"
 	}
 	return &order.GoodsInfo{
 		GoodsName: fmt.Sprintf("Recharge %d credits", amount),
@@ -411,7 +411,7 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 	LockOrder(merchantOrderId)
 	defer UnlockOrder(merchantOrderId)
 
-	if err := model.RechargeWaffo(merchantOrderId, c.ClientIP()); err != nil {
+	if err := service.RechargeWaffo(merchantOrderId, c.ClientIP()); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo top-up processing failed trade_no=%s client_ip=%s error=%q", merchantOrderId, c.ClientIP(), err.Error()))
 		sendWaffoWebhookResponse(c, wh, false, err.Error())
 		return
