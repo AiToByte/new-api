@@ -20,7 +20,10 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-import { convertDetectedLanguage, normalizeInterfaceLanguage } from './languages'
+import {
+  convertDetectedLanguage,
+  normalizeInterfaceLanguage,
+} from './languages'
 import en from './locales/en.json'
 
 // Only English ships in the entry chunk (fallback language, ~540KB saved
@@ -30,13 +33,17 @@ import en from './locales/en.json'
 // fallback until the next language change).
 type LocaleFile = { translation: Record<string, unknown> }
 
-const lazyLocaleLoaders: Record<string, () => Promise<{ default: LocaleFile }>> = {
+const lazyLocaleLoaders: Record<
+  string,
+  () => Promise<{ default: LocaleFile }>
+> = {
   zhCN: () => import(/* webpackChunkName: "locale-zh" */ './locales/zh.json'),
   fr: () => import(/* webpackChunkName: "locale-fr" */ './locales/fr.json'),
   ru: () => import(/* webpackChunkName: "locale-ru" */ './locales/ru.json'),
   ja: () => import(/* webpackChunkName: "locale-ja" */ './locales/ja.json'),
   vi: () => import(/* webpackChunkName: "locale-vi" */ './locales/vi.json'),
-  zhTW: () => import(/* webpackChunkName: "locale-zh-tw" */ './locales/zh-TW.json'),
+  zhTW: () =>
+    import(/* webpackChunkName: "locale-zh-tw" */ './locales/zh-TW.json'),
 }
 
 const pendingLocaleLoads = new Map<string, Promise<void>>()
@@ -52,7 +59,13 @@ export function ensureLocaleLoaded(language: string): Promise<void> {
   if (!pending) {
     pending = loader().then(
       (mod) => {
-        i18n.addResourceBundle(code, 'translation', mod.default.translation, true, true)
+        i18n.addResourceBundle(
+          code,
+          'translation',
+          mod.default.translation,
+          true,
+          true
+        )
         pendingLocaleLoads.delete(code)
       },
       (err: unknown) => {
@@ -72,7 +85,8 @@ function detectInitialLanguage(): string {
   if (typeof window === 'undefined') return 'en'
   try {
     const stored = window.localStorage.getItem('i18nextLng')
-    if (stored) return normalizeInterfaceLanguage(convertDetectedLanguage(stored))
+    if (stored)
+      return normalizeInterfaceLanguage(convertDetectedLanguage(stored))
     const nav = window.navigator?.language
     if (nav) return normalizeInterfaceLanguage(convertDetectedLanguage(nav))
   } catch {

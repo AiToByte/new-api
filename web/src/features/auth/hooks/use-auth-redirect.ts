@@ -24,8 +24,8 @@ import {
   getSavedLanguage,
   sanitizeAuthRedirect,
 } from '@/features/auth/lib/auth-redirect'
-import { applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { ensureLocaleLoaded } from '@/i18n/config'
+import { applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { AuthOperationError } from '@/lib/secure-verification'
 import { useAuthStore, type AuthBundle } from '@/stores/auth-store'
 
