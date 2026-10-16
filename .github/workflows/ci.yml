@@ -17,8 +17,40 @@ jobs:
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: '123456'
+          MYSQL_DATABASE: newapi
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -p123456"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: '123456'
+          POSTGRES_DB: newapi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U root -d newapi"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
     env:
       GOWORK: 'off'
+      # The multi-dialect matrix tests (TEST_MYSQL_DSN / TEST_POSTGRES_DSN)
+      # silently skip when these are unset. Wiring them to loopback services
+      # keeps the AGENTS.md three-database requirement actually enforced.
+      # Loopback is mandatory: the test helpers reject non-loopback instances.
+      TEST_MYSQL_DSN: 'root:123456@tcp(127.0.0.1:3306)/newapi?parseTime=true'
+      TEST_POSTGRES_DSN: 'postgresql://root:123456@127.0.0.1:5432/newapi?sslmode=disable'
 
     steps:
       - name: Checkout
@@ -26,6 +58,7 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -66,6 +99,21 @@ jobs:
       - name: Test root, relaykit, and tokenkit modules
         run: make test
 
+      # Changed-files only: main is not lint/format clean, so a full gate
+      # would block every PR. Added/modified/copied/renamed files only.
+      - name: Check gofmt on changed files
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          files=$(git diff "$base"...HEAD --name-only --diff-filter=ACMR -- '*.go' | grep -v '^vendor/' || true)
+          if [ -z "$files" ]; then echo 'no Go changes'; exit 0; fi
+          unformatted=$(echo "$files" | xargs gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo 'These files need gofmt:'
+            echo "$unformatted"
+            exit 1
+          fi
+          echo 'gofmt check passed'
+
   frontend:
     name: Frontend typecheck and test
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
@@ -81,6 +129,7 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -95,3 +144,58 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Check formatting
+        run: bun run format:check
+
+      - name: Check copyright headers
+        run: bun run copyright:check
+
+      - name: Check i18n sync
+        # sync-i18n has no check mode; it rewrites locale files in place.
+        # A clean tree must produce zero diff on tracked locale files.
+        # Reports under src/i18n/locales/_reports are gitignored.
+        run: |
+          bun run i18n:sync
+          git diff --exit-code -- src/i18n/locales
+
+      # Changed-files only (see backend gofmt gate for rationale).
+      # Vendored shadcn primitives and the generated route tree keep
+      # their .oxlintrc.json ignores here as explicit exclusions.
+      - name: Lint changed files
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          files=$(git diff "$base"...HEAD --name-only --diff-filter=ACMR -- 'src/**' | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' | grep -v '^src/components/ui/' | grep -v '^src/routeTree.gen.ts$' || true)
+          if [ -z "$files" ]; then echo 'no lintable changes'; exit 0; fi
+          echo "$files" | xargs bunx oxlint -c .oxlintrc.json
+
+  layering-guard:
+    name: Controller layering guard
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.base.repo.full_name }}
+          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
+
+      # Phase 3.1: controller code must not reach past the service layer.
+      # Only ADDED lines are checked, so the pre-existing violations listed in
+      # docs/architecture-debt.md (D4) are grandfathered until Phase 3.2 moves them.
+      # c.JSON is intentionally not gated: relay envelopes, downloads and SSE
+      # paths use it legitimately; it stays a documented convention.
+      - name: Forbid new model.DB and raw transactions in controller
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          added=$(git diff "$base"...HEAD -- 'controller/*.go' ':!controller/*_test.go' | grep '^+' | grep -v '^+++' | grep -vE '^\+\s*//' || true)
+          violations=$(printf '%s\n' "$added" | grep -E '(^|[^A-Za-z0-9_.])model[.](DB|LOG_DB)([^A-Za-z0-9_]|$)|[.]Transaction[(]' || true)
+          if [ -n "$violations" ]; then
+            echo 'New controller code must not reference model.DB/model.LOG_DB or open transactions directly.'
+            echo 'Put the query in service/ (preferred) or model/, see docs/architecture-debt.md Phase 3.'
+            echo "$violations"
+            exit 1
+          fi
+          echo 'layering guard passed'
