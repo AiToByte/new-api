@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +23,9 @@ func redisEmailVerificationRateLimiter(c *gin.Context) {
 		EmailVerificationDuration,
 	)
 	if err != nil {
+		// Redis 不可用时降级为内存限流（单机语义），但必须告警：
+		// 静默降级会让多节点部署的限流形同虚设而不自知。
+		logger.LogError(c.Request.Context(), common.LogText("email verification rate limit falling back to memory: %v", err))
 		memoryEmailVerificationRateLimiter(c)
 		return
 	}

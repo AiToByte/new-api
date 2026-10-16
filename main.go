@@ -5,7 +5,6 @@ import (
 	"context"
 	"embed"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -164,6 +163,16 @@ func main() {
 		model.InitBatchUpdater()
 	}
 
+	// 开机对账：把 Redis 实时余额与数据库对账，补回上次崩溃/断电丢失的
+	// 批量落库窗口。必须在服务流量进来之前执行一次；函数内部按
+	// master 节点、批量开关、Redis 可用性自门控，未启用时零开销。
+	if stats, err := model.ReconcileQuotaCacheOnBoot(); err != nil {
+		common.SysError(common.LogText("quota cache reconcile failed: %s", err.Error()))
+	} else {
+		common.SysLog(common.LogText("quota cache reconcile: tokens checked %d adjusted %d, users checked %d adjusted %d, skipped %d",
+			stats.TokensChecked, stats.TokensAdjusted, stats.UsersChecked, stats.UsersAdjusted, stats.SkippedFenced))
+	}
+
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
 			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))
@@ -187,7 +196,7 @@ func main() {
 		common.SysLog(common.LogText("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/new-api", err),
+				"message": "Panic detected. Please submit an issue here: https://github.com/Calcium-Ion/new-api",
 				"type":    "new_api_panic",
 			},
 		})
@@ -241,6 +250,11 @@ func main() {
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
+	}
+	// 批量结算的内存增量必须在退出前落库，否则重启会丢失未刷新的扣款。
+	// 与定时刷共用 flushBatchStores，行为一致；开关未开或存储为空时为零开销。
+	if flushed := model.FlushBatchUpdates(); flushed > 0 {
+		common.SysLog(common.LogText("flushed %d pending batch settlement entries on shutdown", flushed))
 	}
 	common.SysLog(common.LogText("server exited"))
 }

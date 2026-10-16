@@ -892,3 +892,55 @@ func verifyAPITokenAudit(t *testing.T) {
 		assert.EqualValues(t, 1, count)
 	})
 }
+
+func TestAddTokenRejectsNestedEnvelope(t *testing.T) {
+	setupTokenControllerTestDB(t)
+
+	nested := map[string]any{
+		"token": map[string]any{
+			"name":              "nested-token",
+			"expired_time":      -1,
+			"remain_quota":      100,
+			"unlimited_quota":   false,
+			"group":             "default",
+			"cross_group_retry": false,
+		},
+	}
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", nested, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	assert.Contains(t, response.Message, "flat object")
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Token{}).Where("name = ?", "nested-token").Count(&count).Error)
+	assert.Zero(t, count, "nested payload must not create a row, empty or otherwise")
+}
+
+func TestUpdateTokenRejectsNestedEnvelope(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "editable-token", "yzab1234cdef5678")
+
+	nested := map[string]any{
+		"id": token.Id,
+		"token": map[string]any{
+			"name":              "wiped-token",
+			"expired_time":      -1,
+			"remain_quota":      100,
+			"unlimited_quota":   true,
+			"group":             "default",
+			"cross_group_retry": false,
+		},
+	}
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/", nested, 1)
+	UpdateToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.False(t, response.Success)
+	assert.Contains(t, response.Message, "flat object")
+
+	var persisted model.Token
+	require.NoError(t, model.DB.First(&persisted, token.Id).Error)
+	assert.Equal(t, "editable-token", persisted.Name, "nested payload must not wipe the stored row")
+}

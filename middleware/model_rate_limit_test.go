@@ -141,3 +141,22 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 		})
 	}
 }
+
+// Infra failure must fail open like the main limiter: a dead Redis may not
+// turn model relay traffic into 500s. Enforcement resumes automatically
+// when Redis recovers; both probes below must pass, not just the first.
+func TestModelRedisRateLimitFailOpenOnInfraError(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	useDeadRedis(t)
+	userID := 7300000 + int(modelRateLimitTestUsers.Add(1))
+	handler := redisRateLimitHandler(60, 0, 1)
+	router := gin.New()
+	router.GET("/:outcome", func(c *gin.Context) { c.Set("id", userID) }, handler, func(c *gin.Context) {
+		status := relaycommon.NewStreamStatus()
+		status.MarkCompleted()
+		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
+		c.Status(http.StatusOK)
+	})
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/completed", "127.0.0.1:1001").Code)
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/completed", "127.0.0.1:1001").Code)
+}

@@ -12,11 +12,15 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 		return false
 	}
 	if !common.MemoryCacheEnabled {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		return isChannelEnabledForGroupModelDB(group, modelName, channelID)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
+
+	// Below this point every return is served from the in-memory maps.
+	NoteReadCacheHit(ReadCacheScopeChannel)
 
 	if group2model2channels == nil {
 		return false

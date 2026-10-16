@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -11,8 +12,35 @@ import (
 	"gorm.io/gorm"
 )
 
+func BenchmarkDecreaseTokenQuotaSQLite(b *testing.B) {
+	token := createReserveTestTokenForBench(b, math.MaxInt32)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := decreaseTokenQuota(token.Id, 1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func createReserveTestTokenForBench(b *testing.B, remainQuota int) Token {
+	b.Helper()
+	token := Token{
+		UserId:      1,
+		Key:         "reserve-bench-" + common.GetRandomString(8),
+		Name:        "reserve-bench",
+		Status:      common.TokenStatusEnabled,
+		ExpiredTime: -1,
+		RemainQuota: remainQuota,
+	}
+	require.NoError(b, token.Insert())
+	b.Cleanup(func() {
+		DB.Unscoped().Delete(&Token{}, token.Id)
+	})
+	return token
+}
+
 func createReserveTestUser(t *testing.T, quota int) User {
-	t.Helper()
 	user := User{
 		Username:    "reserve-user-" + common.GetRandomString(6),
 		Password:    "unused-password-hash",
@@ -258,4 +286,165 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	cached, err = cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 100, cached.RemainQuota)
+}
+
+// TestFlushBatchUpdatesPersistsPendingDeltas 验证优雅关闭落盘语义：
+// 内存增量必须一滴不剩进数据库，且落完后再次刷新是空操作。
+func TestFlushBatchUpdatesPersistsPendingDeltas(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	common.BatchUpdateEnabled = true
+
+	user := createReserveTestUser(t, 1000)
+	token := createReserveTestToken(t, 1000)
+	addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+	addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -50)
+
+	flushed := FlushBatchUpdates()
+	assert.GreaterOrEqual(t, flushed, 2)
+	assert.Equal(t, 900, getUserQuotaFromDB(t, user.Id))
+	assert.Equal(t, 950, getTokenFromDB(t, token.Id).RemainQuota)
+	assert.Zero(t, FlushBatchUpdates(), "second flush must be a no-op")
+}
+
+// TestFlushBatchUpdatesNoopWhenDisabled 验证开关关闭时刷新零开销、
+// 不打日志不碰库（main.go 关机路径依赖此语义）。
+func TestFlushBatchUpdatesNoopWhenDisabled(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	assert.Zero(t, FlushBatchUpdates())
+}
+
+func enableReconcileTestEnv(t *testing.T) {
+	t.Helper()
+	useUserCacheMiniRedis(t)
+	oldBatchEnabled := common.BatchUpdateEnabled
+	oldMaster := common.IsMasterNode
+	common.BatchUpdateEnabled = true
+	common.IsMasterNode = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchEnabled
+		common.IsMasterNode = oldMaster
+	})
+}
+
+// TestReconcileQuotaCacheOnBootRecoversLostWindow 模拟崩溃：
+// Redis 已扣、DB 未刷（绕开批量队列直接写 Redis，正如崩溃瞬间），
+// 对账必须把差值补回数据库。
+func TestReconcileQuotaCacheOnBootRecoversLostWindow(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := openTopUpPaginationTestDB(t, dialect)
+			require.NoError(t, db.AutoMigrate(&Token{}, &User{}))
+			require.NoError(t, db.Exec("DELETE FROM tokens").Error)
+			require.NoError(t, db.Exec("DELETE FROM users").Error)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+
+			previousDB := DB
+			previousMainType := common.MainDatabaseType()
+			previousLogType := common.LogDatabaseType()
+			DB = db
+			dialectType := common.DatabaseTypeSQLite
+			if dialect == "mysql" {
+				dialectType = common.DatabaseTypeMySQL
+			}
+			if dialect == "postgres" {
+				dialectType = common.DatabaseTypePostgreSQL
+			}
+			common.SetDatabaseTypes(dialectType, dialectType)
+			initCol()
+			t.Cleanup(func() {
+				DB = previousDB
+				common.SetDatabaseTypes(previousMainType, previousLogType)
+				initCol()
+			})
+
+			truncateTables(t)
+			resetBatchUpdateTestState(t)
+			enableReconcileTestEnv(t)
+
+			user := createReserveTestUser(t, 1000)
+			_, err = GetUserCache(user.Id)
+			require.NoError(t, err)
+			require.NoError(t, cacheDecrUserQuota(user.Id, 200))
+
+			token := createReserveTestToken(t, 1000)
+			_, err = GetTokenByKey(token.Key, true)
+			require.NoError(t, err)
+			_, err = cacheApplyTokenQuotaDelta(token.Id, token.Key, -300)
+			require.NoError(t, err)
+
+			// 崩溃前 DB 纹丝不动。
+			assert.Equal(t, 1000, getUserQuotaFromDB(t, user.Id))
+			assert.Equal(t, 1000, getTokenFromDB(t, token.Id).RemainQuota)
+
+			stats, err := ReconcileQuotaCacheOnBoot()
+			require.NoError(t, err)
+			assert.Equal(t, 1, stats.UsersAdjusted)
+			assert.Equal(t, 1, stats.TokensAdjusted)
+
+			assert.Equal(t, 800, getUserQuotaFromDB(t, user.Id))
+			reloaded := getTokenFromDB(t, token.Id)
+			assert.Equal(t, 700, reloaded.RemainQuota)
+			assert.Equal(t, 300, reloaded.UsedQuota)
+
+			// 已对平后再次对账必须是空操作。
+			stats, err = ReconcileQuotaCacheOnBoot()
+			require.NoError(t, err)
+			assert.Zero(t, stats.UsersAdjusted)
+			assert.Zero(t, stats.TokensAdjusted)
+		})
+	}
+}
+
+// TestReconcileQuotaCacheOnBootSkipsFencedKeys fence 生效中的键正在变更，
+// 跳过（下一轮定时刷会收敛），绝不能按过期快照回写。
+func TestReconcileQuotaCacheOnBootSkipsFencedKeys(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	enableReconcileTestEnv(t)
+
+	token := createReserveTestToken(t, 1000)
+	_, err := cacheApplyTokenQuotaDelta(token.Id, token.Key, -100)
+	require.NoError(t, err)
+	// 手动立起 fence 但保留哈希，模拟“变更在途、快照仍在”：
+	// invalidateTokenCacheForMutation 会连哈希一起删，不适用这里。
+	_, err = GetTokenByKey(token.Key, true)
+	require.NoError(t, err)
+	require.NoError(t, common.RDB.Set(context.Background(), getTokenCacheFenceKey(token.Key), 1, time.Minute).Err())
+
+	stats, err := ReconcileQuotaCacheOnBoot()
+	require.NoError(t, err)
+	assert.Equal(t, 1000, getTokenFromDB(t, token.Id).RemainQuota)
+	assert.GreaterOrEqual(t, stats.SkippedFenced, 1)
+}
+
+// TestReconcileQuotaCacheOnBootGates 未启用批量、Redis 不可用、非 master
+// 时必须是零开销的空操作，绝不碰数据库。
+func TestReconcileQuotaCacheOnBootGates(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	useUserCacheMiniRedis(t)
+	oldMaster := common.IsMasterNode
+	t.Cleanup(func() { common.IsMasterNode = oldMaster })
+
+	// 批量关闭。
+	stats, err := ReconcileQuotaCacheOnBoot()
+	require.NoError(t, err)
+	assert.Zero(t, stats)
+
+	// 批量开但非 master（默认即非 master）。
+	common.BatchUpdateEnabled = true
+	stats, err = ReconcileQuotaCacheOnBoot()
+	require.NoError(t, err)
+	assert.Zero(t, stats)
+
+	// master 但 Redis 不可用。
+	common.IsMasterNode = true
+	common.RedisEnabled = false
+	stats, err = ReconcileQuotaCacheOnBoot()
+	require.NoError(t, err)
+	assert.Zero(t, stats)
 }

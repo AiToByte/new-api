@@ -115,9 +115,10 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 		duration,
 	)
 	if err != nil {
-		logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (mark=%s): %v", mark, err))
-		c.Status(http.StatusInternalServerError)
-		c.Abort()
+		// 基础设施故障必须 fail-open：限流器坏了不能把正常付费用户的
+		// 请求全打成 500。告警日志是唯一的防线，外部监控应对该行告警。
+		logger.LogError(c.Request.Context(), common.LogText("rate limit fail-open (mark=%s): %v", mark, err))
+		c.Next()
 		return
 	}
 	if !allowed {
@@ -246,13 +247,12 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 }
 
 // userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
-// (to support user-ID-based keys).
+// (to support user-ID-based keys). Same fail-open contract on infra errors.
 func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
 	allowed, _, ttlSeconds, err := redisFixedWindowTake(c.Request.Context(), key, maxRequestNum, duration)
 	if err != nil {
-		logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (key=%s): %v", key, err))
-		c.Status(http.StatusInternalServerError)
-		c.Abort()
+		logger.LogError(c.Request.Context(), common.LogText("rate limit fail-open (key=%s): %v", key, err))
+		c.Next()
 		return
 	}
 	if !allowed {

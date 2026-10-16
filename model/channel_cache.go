@@ -122,11 +122,15 @@ func GetRandomSatisfiedChannel(
 ) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		return GetChannel(group, model, retry, filters)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
+
+	// Below this point every return is served from the in-memory maps.
+	NoteReadCacheHit(ReadCacheScopeChannel)
 
 	// First, try to find channels with the exact model name.
 	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
@@ -218,6 +222,7 @@ func GetRandomSatisfiedChannel(
 
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		return GetChannelById(id, true)
 	}
 	channelSyncLock.RLock()
@@ -225,13 +230,16 @@ func CacheGetChannel(id int) (*Channel, error) {
 
 	c, ok := channelsIDM[id]
 	if !ok {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		return nil, fmt.Errorf("channel #%d no longer exists", id)
 	}
+	NoteReadCacheHit(ReadCacheScopeChannel)
 	return c, nil
 }
 
 func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	if !common.MemoryCacheEnabled {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		channel, err := GetChannelById(id, true)
 		if err != nil {
 			return nil, err
@@ -243,8 +251,10 @@ func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 
 	c, ok := channelsIDM[id]
 	if !ok {
+		NoteReadCacheMiss(ReadCacheScopeChannel)
 		return nil, fmt.Errorf("channel #%d no longer exists", id)
 	}
+	NoteReadCacheHit(ReadCacheScopeChannel)
 	return &c.ChannelInfo, nil
 }
 

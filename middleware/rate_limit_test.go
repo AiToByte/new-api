@@ -199,6 +199,9 @@ func TestRedisFixedWindowRepairsCounterWithoutTTL(t *testing.T) {
 }
 
 func TestRedisFailurePolicies(t *testing.T) {
+	// 基础设施故障的统一策略是 fail-open（外加告警日志）：限流器自身
+	// 故障绝不能把正常请求打成 500，只有业务超限才返回 429。
+	// 邮件校验走内存降级，同样不断流。
 	gin.SetMode(gin.TestMode)
 	_, redisClient := useRateLimitMiniRedis(t)
 	require.NoError(t, redisClient.Close())
@@ -219,10 +222,10 @@ func TestRedisFailurePolicies(t *testing.T) {
 	})
 
 	ipResponse := performRateLimitRequest(router, "/ip", "192.0.2.60:12345")
-	assert.Equal(t, http.StatusInternalServerError, ipResponse.Code)
+	assert.Equal(t, http.StatusNoContent, ipResponse.Code)
 	assert.Empty(t, ipResponse.Body.String())
 	userResponse := performRateLimitRequest(router, "/user", "192.0.2.61:12345")
-	assert.Equal(t, http.StatusInternalServerError, userResponse.Code)
+	assert.Equal(t, http.StatusNoContent, userResponse.Code)
 	assert.Empty(t, userResponse.Body.String())
 	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
 }
@@ -289,4 +292,71 @@ func TestGlobalWebRateLimitCountsFrontendFilesInStaticBucket(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "1", webCount)
 	})
+}
+
+// useDeadRedis points the shared client at a refused port: every Redis
+// command fails fast without hanging the test on dial timeouts.
+func useDeadRedis(t *testing.T) {
+	t.Helper()
+
+	previousRedisEnabled := common.RedisEnabled
+	previousRedisClient := common.RDB
+	dead := redis.NewClient(&redis.Options{
+		Addr:         "127.0.0.1:1",
+		DialTimeout:  100 * time.Millisecond,
+		ReadTimeout:  100 * time.Millisecond,
+		WriteTimeout: 100 * time.Millisecond,
+		MaxRetries:   0,
+	})
+	common.RedisEnabled = true
+	common.RDB = dead
+	t.Cleanup(func() {
+		_ = dead.Close()
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRedisClient
+	})
+}
+
+// Infra failure must fail open: a dead Redis may not turn paying users'
+// requests into 500s. Business-limit denials (429) are unaffected.
+func TestRedisRateLimiterFailOpenOnInfraError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	useDeadRedis(t)
+
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	router.GET("/limited", rateLimitFactory(1, 60, "TEST-FAILOPEN"), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/user-limited",
+		func(c *gin.Context) { c.Set("id", 424242) },
+		userRateLimitFactory(1, 60, "TEST-FAILOPEN-USER"),
+		func(c *gin.Context) { c.Status(http.StatusNoContent) },
+	)
+
+	remoteAddr := "192.0.2.90:12345"
+	for range 3 {
+		assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/limited", remoteAddr).Code)
+		assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/user-limited", remoteAddr).Code)
+	}
+}
+
+// Email verification degrades to the memory limiter instead of failing
+// open entirely: abuse protection stays up (per node), and legit users
+// are never 500-blocked by a Redis outage.
+func TestEmailVerificationFallsBackToMemoryOnRedisOutage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	useDeadRedis(t)
+
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	router.GET("/verification", EmailVerificationRateLimit(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	remoteAddr := "192.0.2.91:12345"
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/verification", remoteAddr).Code)
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/verification", remoteAddr).Code)
+	overLimit := performRateLimitRequest(router, "/verification", remoteAddr)
+	assert.Equal(t, http.StatusTooManyRequests, overLimit.Code)
 }

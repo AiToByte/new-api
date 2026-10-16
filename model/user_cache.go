@@ -89,12 +89,14 @@ func GetUserCache(userId int) (*UserBase, error) {
 	// Try getting from Redis first
 	userCache, err := cacheGetUserBase(userId)
 	if err == nil {
+		NoteReadCacheHit(ReadCacheScopeUser)
 		return userCache, nil
 	}
 
 	// Redis misses and read failures both fall back to the shared database. A
 	// version fence newer than the database is the one exception: allowing that
 	// snapshot would re-authorize a user while a restrictive update is pending.
+	NoteReadCacheMiss(ReadCacheScopeUser)
 	user, err := GetUserById(userId, false)
 	if err != nil {
 		return nil, err

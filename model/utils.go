@@ -79,12 +79,31 @@ func batchUpdate() {
 	}
 
 	common.SysLog(common.LogText("batch update started"))
+	flushBatchStores()
+	common.SysLog(common.LogText("batch update finished"))
+}
+
+// FlushBatchUpdates 把内存中累积的批量结算增量一次性落库并返回落库条目数，
+// 供优雅关闭时调用，避免重启丢失未刷新的扣款（少扣即亏钱）。批量开关未开
+// 启时直接返回 0；空存储时不打日志，避免打扰未启用该功能的部署。
+func FlushBatchUpdates() int {
+	if !common.BatchUpdateEnabled {
+		return 0
+	}
+	return flushBatchStores()
+}
+
+// flushBatchStores 原子置换出全部累积存储并逐条落库，返回落库条目数。
+// 与 batchUpdate 共用，保证定时刷与关闭刷行为完全一致。
+func flushBatchStores() int {
+	flushed := 0
 	stores := make([]map[int]int, BatchUpdateTypeCount)
 	for i := range BatchUpdateTypeCount {
 		batchUpdateLocks[i].Lock()
 		stores[i] = batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
 		batchUpdateLocks[i].Unlock()
+		flushed += len(stores[i])
 	}
 
 	for i, store := range stores {
@@ -121,7 +140,7 @@ func batchUpdate() {
 	for key := range userIDs {
 		updateUserQuotaUsedQuotaAndRequestCount(key, userQuotaStore[key], usedQuotaStore[key], requestCountStore[key])
 	}
-	common.SysLog(common.LogText("batch update finished"))
+	return flushed
 }
 
 func RecordExist(err error) (bool, error) {

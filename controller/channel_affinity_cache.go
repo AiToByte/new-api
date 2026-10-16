@@ -11,11 +11,13 @@ import (
 
 func GetChannelAffinityCacheStats(c *gin.Context) {
 	stats := service.GetChannelAffinityCacheStats()
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    stats,
-	})
+	common.ApiSuccess(c, stats)
+}
+
+// GetReadCacheStats 返回请求级读路径（token/user/channel）的缓存命中计数，
+// 用于定位缓存未命中造成的数据库压力。Root 权限，见路由 optionRoute。
+func GetReadCacheStats(c *gin.Context) {
+	common.ApiSuccess(c, service.ReadCacheStats())
 }
 
 func ClearChannelAffinityCache(c *gin.Context) {
@@ -24,12 +26,8 @@ func ClearChannelAffinityCache(c *gin.Context) {
 
 	if all == "true" {
 		deleted := service.ClearChannelAffinityCacheAll()
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data": gin.H{
-				"deleted": deleted,
-			},
+		common.ApiSuccess(c, gin.H{
+			"deleted": deleted,
 		})
 		return
 	}
@@ -45,12 +43,8 @@ func ClearChannelAffinityCache(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"deleted": deleted,
-		},
+	common.ApiSuccess(c, gin.H{
+		"deleted": deleted,
 	})
 }
 
@@ -75,9 +69,5 @@ func GetChannelAffinityUsageCacheStats(c *gin.Context) {
 	}
 
 	stats := service.GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFp)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    stats,
-	})
+	common.ApiSuccess(c, stats)
 }

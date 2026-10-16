@@ -223,6 +223,22 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	}
 	token, err = GetTokenByKey(key, false)
 	if err == nil {
+		// 自愈：曾经因额度耗尽被标记为 Exhausted 的令牌，只要当前又有
+		// 了可用额度（充值/补额/改为不限额），就在本次校验中自动恢复
+		// 为可用，无需管理员手动翻状态。注意三点：
+		// 1. Disabled 是管理员的主动停用，永不自动恢复；
+		// 2. Expired 是时间语义，不在这里处理；
+		// 3. 恢复后继续走下面的过期/额度检查，若额度在此期间又被
+		//    花光，后续检查会再次拒绝并重新标记，语义闭环。
+		// SelectUpdate 自带缓存 fence，Redis 路径同样一致。
+		if token.Status == common.TokenStatusExhausted &&
+			(token.UnlimitedQuota || token.RemainQuota > 0) {
+			token.Status = common.TokenStatusEnabled
+			if err := token.SelectUpdate(); err != nil {
+				common.SysLog(common.LogText("failed to heal exhausted token status: %s", err.Error()))
+				return token, ErrTokenInvalid
+			}
+		}
 		if token.Status == common.TokenStatusExhausted ||
 			token.Status == common.TokenStatusExpired ||
 			token.Status != common.TokenStatusEnabled {
@@ -282,11 +298,13 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
 		if err == nil {
+			NoteReadCacheHit(ReadCacheScopeToken)
 			return token, nil
 		}
 		// Don't return error - fall through to DB
 	}
 	token = &Token{}
+	NoteReadCacheMiss(ReadCacheScopeToken)
 	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
 		return nil, err
 	}

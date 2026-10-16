@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 
@@ -44,7 +45,10 @@ func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, max
 	}
 
 	// 检查时间窗口
-	oldTimeStr, _ := rdb.LIndex(ctx, key, -1).Result()
+	oldTimeStr, err := rdb.LIndex(ctx, key, -1).Result()
+	if err != nil {
+		return false, err
+	}
 	oldTime, err := time.Parse(modelRateLimitTimeFormat, oldTimeStr)
 	if err != nil {
 		return false, err
@@ -73,9 +77,15 @@ func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxC
 	}
 
 	now := time.Now().UTC().Format(modelRateLimitTimeFormat)
-	rdb.LPush(ctx, key, now)
-	rdb.LTrim(ctx, key, 0, int64(maxCount-1))
-	rdb.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
+	_, err := rdb.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.LPush(ctx, key, now)
+		pipe.LTrim(ctx, key, 0, int64(maxCount-1))
+		pipe.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
+		return nil
+	})
+	if err != nil {
+		common.SysLog(common.LogText("failed to record model request for rate limiting: %s", err.Error()))
+	}
 }
 
 // Redis限流处理器
@@ -89,8 +99,13 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, userId)
 		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration)
 		if err != nil {
-			fmt.Println(common.LogText("failed to check the successful request limit: %s", err.Error()))
-			abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
+			// 基础设施故障 fail-open：逻辑同主限流器，误杀正常请求比
+			// 漏过超限请求代价更高；告警日志是唯一的防线。
+			logger.LogError(ctx, common.LogText("model rate limit fail-open: %s", err.Error()))
+			c.Next()
+			if modelRequestSucceeded(c) {
+				recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+			}
 			return
 		}
 		if !allowed {
@@ -112,8 +127,11 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			)
 
 			if err != nil {
-				fmt.Println(common.LogText("failed to check the total request limit: %s", err.Error()))
-				abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
+				logger.LogError(ctx, common.LogText("model rate limit fail-open (total): %s", err.Error()))
+				c.Next()
+				if modelRequestSucceeded(c) {
+					recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+				}
 				return
 			}
 

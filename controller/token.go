@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +37,43 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 type tokenRequest struct {
 	model.Token
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+}
+
+// decodeTokenRequest 读取令牌载荷并拦截嵌套写法，返回是否继续处理。
+// tokenRequest 依赖 Go 嵌入提升，只接受扁平体；{"token": {...}} 会被
+// 静默忽略——Add 会建出空行，Update 会清空已有行，且该形状历史上从未
+// 产生过有效数据，因此直接 400 打回。读取后回填 Body，后续绑定逻辑
+// 与原来逐字节一致。
+func decodeTokenRequest(c *gin.Context, request *tokenRequest) bool {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	if hasNestedTokenEnvelope(body) {
+		common.ApiErrorT(c, "Token payload must be a flat object, do not nest it under a \"token\" key")
+		return false
+	}
+	if err := c.ShouldBindJSON(request); err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	return true
+}
+
+// hasNestedTokenEnvelope 检测 {"token": {...}} 嵌套体。纯函数，便于单测。
+func hasNestedTokenEnvelope(body []byte) bool {
+	var envelope map[string]any
+	if err := common.Unmarshal(body, &envelope); err != nil {
+		return false
+	}
+	nested, ok := envelope["token"]
+	if !ok || nested == nil {
+		return false
+	}
+	_, isObj := nested.(map[string]any)
+	return isObj
 }
 
 type tokenResponse struct {
@@ -277,9 +316,7 @@ func GetTokenUsage(c *gin.Context) {
 
 func AddToken(c *gin.Context) {
 	request := tokenRequest{}
-	err := c.ShouldBindJSON(&request)
-	if err != nil {
-		common.ApiError(c, err)
+	if !decodeTokenRequest(c, &request) {
 		return
 	}
 	token := request.Token
@@ -381,9 +418,7 @@ func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
 	statusOnly := c.Query("status_only")
 	request := tokenRequest{}
-	err := c.ShouldBindJSON(&request)
-	if err != nil {
-		common.ApiError(c, err)
+	if !decodeTokenRequest(c, &request) {
 		return
 	}
 	token := request.Token
@@ -478,11 +513,7 @@ func UpdateToken(c *gin.Context) {
 		params["changed_fields"] = changedFields
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenAuditSucceeded, true)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    buildMaskedTokenResponse(cleanToken),
-	})
+	common.ApiSuccess(c, buildMaskedTokenResponse(cleanToken))
 }
 
 type TokenBatch struct {
@@ -508,11 +539,7 @@ func DeleteTokenBatch(c *gin.Context) {
 	}
 	params["count"] = count
 	common.SetContextKey(c, constant.ContextKeyTokenAuditSucceeded, true)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    count,
-	})
+	common.ApiSuccess(c, count)
 }
 
 func GetTokenKeysBatch(c *gin.Context) {
