@@ -169,6 +169,87 @@ jobs:
           if [ -z "$files" ]; then echo 'no lintable changes'; exit 0; fi
           echo "$files" | xargs bunx oxlint -c .oxlintrc.json
 
+  e2e:
+    name: Frontend E2E (Playwright)
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    env:
+      # The whole harness (both dev servers) talks to this scratch backend.
+      # Port 3002 matches the local scratch setup, so no spec changes needed.
+      E2E_API_URL: 'http://localhost:3002'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.base.repo.full_name }}
+          ref: ${{ github.event.action == 'closed' && github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build scratch backend (SQLite, zero services)
+        working-directory: .
+        run: go build -o /tmp/newapi-e2e .
+
+      - name: Start scratch backend
+        working-directory: .
+        run: |
+          mkdir -p /tmp/e2edata
+          cd /tmp/e2edata
+          /tmp/newapi-e2e --port 3002 > /tmp/e2edata/backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3002/api/status > /dev/null; then
+              echo 'scratch backend is up'
+              break
+            fi
+            if [ "$i" = 30 ]; then
+              echo 'scratch backend failed to start'
+              cat /tmp/e2edata/backend.log
+              exit 1
+            fi
+            sleep 5
+          done
+          # Fresh SQLite has no root user, so the app would force /setup and
+          # the specs (which assume landing/sign-up/sign-in pages) would fail.
+          # Initialize once; the E2E specs create their own users afterwards.
+          curl -sf -X POST http://localhost:3002/api/setup \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ciroot","password":"Ci!root1234","confirmPassword":"Ci!root1234"}'
+
+      - name: Cache Playwright browsers
+        # Floating tag (not SHA-pinned like the rest): the exact v4 SHA
+        # could not be resolved offline; replace with a pin when online.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install browsers
+        run: |
+          bunx playwright install chromium --only-shell
+          sudo bunx playwright install-deps chromium
+
+      - name: Run E2E
+        run: bun run test:e2e
+
   layering-guard:
     name: Controller layering guard
     if: github.event.action != 'closed' || github.event.pull_request.merged == true

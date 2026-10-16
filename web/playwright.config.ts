@@ -38,16 +38,24 @@ export default defineConfig({
       url: 'http://localhost:3100',
       reuseExistingServer: true,
       timeout: 180000,
+      // CI points the whole harness at its scratch backend; locally this
+      // stays unset and the dev default (production :3000 proxy) applies.
+      env: {
+        ...(process.env.E2E_API_URL
+          ? { VITE_REACT_APP_SERVER_URL: process.env.E2E_API_URL }
+          : {}),
+      },
     },
     {
-      // Captcha specs run against the scratch PG backend (:3002), never
+      // Captcha specs run against the scratch backend (:3002), never
       // production (:3000). CaptchaEnabled is toggled on that instance only.
       command: 'bun run dev -- --port 3101',
       url: 'http://localhost:3101',
       reuseExistingServer: true,
       timeout: 180000,
       env: {
-        VITE_REACT_APP_SERVER_URL: 'http://localhost:3002',
+        VITE_REACT_APP_SERVER_URL:
+          process.env.E2E_SCRATCH_API_URL ?? 'http://localhost:3002',
       },
     },
   ],
