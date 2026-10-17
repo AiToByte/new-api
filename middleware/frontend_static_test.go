@@ -150,3 +150,96 @@ func TestServeFrontendFilesEncodingNegotiation(t *testing.T) {
 		})
 	}
 }
+
+func TestServeFrontendFilesETagAndConditionalRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	frontendDir := t.TempDir()
+	script := []byte(strings.Repeat("const value = 2;\n", 200))
+	require.NoError(t, os.MkdirAll(filepath.Join(frontendDir, "static", "js"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(frontendDir, "static", "js", "app.a1b2c3d4e5.js"), script, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(frontendDir, "static", "js", "app.js"), script, 0o644))
+
+	router := gin.New()
+	router.NoRoute(ServeFrontendFiles(static.LocalFile(frontendDir, false)))
+
+	// 哈希命名的文件按编码区分校验器：br 与 gzip 的 ETag 必须不同，
+	// 客户端切换 Accept-Encoding 重新协商时会重新拉取对应表示。
+	br := performFrontendRequest(router, http.MethodGet, "/static/js/app.a1b2c3d4e5.js", "br")
+	require.Equal(t, http.StatusOK, br.Code)
+	assert.Equal(t, `"a1b2c3d4e5-br"`, br.Header().Get("ETag"))
+	gz := performFrontendRequest(router, http.MethodGet, "/static/js/app.a1b2c3d4e5.js", "gzip")
+	require.Equal(t, http.StatusOK, gz.Code)
+	assert.Equal(t, `"a1b2c3d4e5-gzip"`, gz.Header().Get("ETag"))
+	assert.NotEqual(t, br.Header().Get("ETag"), gz.Header().Get("ETag"))
+
+	// If-None-Match 命中当前编码的校验器时返回 304，且不携带表示头。
+	conditional := httptest.NewRequest(http.MethodGet, "/static/js/app.a1b2c3d4e5.js", nil)
+	conditional.Header.Set("Accept-Encoding", "br")
+	conditional.Header.Set("If-None-Match", `"a1b2c3d4e5-br"`)
+	notModified := httptest.NewRecorder()
+	router.ServeHTTP(notModified, conditional)
+	require.Equal(t, http.StatusNotModified, notModified.Code)
+	assert.Empty(t, notModified.Body.Bytes())
+	assert.Equal(t, `"a1b2c3d4e5-br"`, notModified.Header().Get("ETag"))
+	assert.Empty(t, notModified.Header().Get("Content-Encoding"))
+	assert.Empty(t, notModified.Header().Get("Content-Length"))
+
+	// 校验器不匹配（例如部署后哈希变化）时返回完整新表示。
+	stale := httptest.NewRequest(http.MethodGet, "/static/js/app.a1b2c3d4e5.js", nil)
+	stale.Header.Set("Accept-Encoding", "br")
+	stale.Header.Set("If-None-Match", `"deadbeef00-br"`)
+	fresh := httptest.NewRecorder()
+	router.ServeHTTP(fresh, stale)
+	require.Equal(t, http.StatusOK, fresh.Code)
+	assert.Equal(t, "br", fresh.Header().Get("Content-Encoding"))
+	assert.NotEmpty(t, fresh.Body.Bytes())
+
+	// 未压缩路径把裸哈希交给 http.FileServer，由它完成 304。
+	raw := performFrontendRequest(router, http.MethodGet, "/static/js/app.a1b2c3d4e5.js", "")
+	require.Equal(t, http.StatusOK, raw.Code)
+	assert.Equal(t, `"a1b2c3d4e5"`, raw.Header().Get("ETag"))
+	rawConditional := httptest.NewRequest(http.MethodGet, "/static/js/app.a1b2c3d4e5.js", nil)
+	rawConditional.Header.Set("If-None-Match", `"a1b2c3d4e5"`)
+	rawNotModified := httptest.NewRecorder()
+	router.ServeHTTP(rawNotModified, rawConditional)
+	assert.Equal(t, http.StatusNotModified, rawNotModified.Code)
+
+	// 非哈希命名的文件不设置 ETag，按协商编码返回完整内容。
+	unhashed := performFrontendRequest(router, http.MethodGet, "/static/js/app.js", "br")
+	require.Equal(t, http.StatusOK, unhashed.Code)
+	assert.Empty(t, unhashed.Header().Get("ETag"))
+	assert.Equal(t, "br", unhashed.Header().Get("Content-Encoding"))
+	assert.NotEmpty(t, unhashed.Body.Bytes())
+}
+
+func TestCacheMiddlewareAssetPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(Cache())
+	router.NoRoute(func(c *gin.Context) {
+		c.String(http.StatusOK, "served")
+	})
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		// 构建产物文件名自带内容哈希，同一 URL 内容永不变化。
+		{"/static/js/app.a1b2c3d4e5.js", "public, max-age=31536000, immutable"},
+		{"/static/font/lora.f60a385cfb.woff2", "public, max-age=31536000, immutable"},
+		// 首页与 .html 直链必须逐次协商，避免部署后读到旧页面。
+		{"/", "no-cache"},
+		{"/index.html", "no-cache"},
+		// 其余路径（favicon 等根目录文件、回退响应）保持一周语义。
+		{"/favicon.ico", "max-age=604800"},
+		{"/unknown", "max-age=604800"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			response := performFrontendRequest(router, http.MethodGet, tc.path, "")
+			require.Equal(t, http.StatusOK, response.Code)
+			assert.Equal(t, tc.want, response.Header().Get("Cache-Control"))
+			assert.NotEmpty(t, response.Header().Get("Cache-Version"))
+		})
+	}
+}

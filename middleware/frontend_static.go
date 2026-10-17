@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,35 @@ type precompressedFile struct {
 	err         error
 }
 
+// contentHashPattern 匹配前端构建产物文件名中的内容哈希段
+// （构建器生成的 8~12 位十六进制，例如 app.a1b2c3d4e5.js）。
+var contentHashPattern = regexp.MustCompile(`\.([0-9a-f]{8,12})\.[A-Za-z0-9]+$`)
+
+// assetETag 从 URL 路径的文件名中提取内容哈希，作为该资源的强校验器。
+// 非哈希命名的文件（index.html、favicon.ico 等）内容可能随部署变化，
+// 返回空字符串，调用方不设置 ETag。
+func assetETag(urlPath string) string {
+	match := contentHashPattern.FindStringSubmatch(path.Base(urlPath))
+	if match == nil {
+		return ""
+	}
+	return match[1]
+}
+
+// ifNoneMatchHit 报告请求的 If-None-Match 头是否命中给定校验器。
+// 按规范把每个逗号分隔的条目视为弱比较候选（剥除 W/ 前缀后比较），"*" 命中一切。
+func ifNoneMatchHit(headerLines []string, etag string) bool {
+	for _, line := range headerLines {
+		for part := range strings.SplitSeq(line, ",") {
+			tag := strings.TrimSpace(part)
+			if tag == "*" || strings.TrimPrefix(tag, "W/") == etag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ServeFrontendFiles 从内嵌的前端构建产物中提供静态文件。
 // 对支持压缩的请求，优先返回 brotli（体积最小），仅当客户端不支持 br 时
 // 回退到 gzip；两者都在首次请求时一次性生成并缓存。
@@ -43,6 +73,7 @@ func ServeFrontendFiles(frontendFS static.ServeFileSystem) gin.HandlerFunc {
 			return
 		}
 		c.Abort()
+		etag := assetETag(urlPath)
 		// brotli 压缩率优于 gzip，因此只要客户端接受 br 就优先使用它。
 		acceptEncoding := c.GetHeader("Accept-Encoding")
 		useBrotli := acceptsEncoding(acceptEncoding, "br")
@@ -50,6 +81,11 @@ func ServeFrontendFiles(frontendFS static.ServeFileSystem) gin.HandlerFunc {
 		if (!useBrotli && !useGzip) ||
 			ginGzip.DefaultExcludedExtentions.Contains(path.Ext(urlPath)) ||
 			strings.HasSuffix(urlPath, "/index.html") {
+			// 哈希命名的文件把内容哈希作为强校验器交给 http.FileServer，
+			// 由它统一处理 If-None-Match 命中后的 304。
+			if etag != "" {
+				c.Writer.Header().Set("ETag", `"`+etag+`"`)
+			}
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
 		}
@@ -124,8 +160,24 @@ func ServeFrontendFiles(frontendFS static.ServeFileSystem) gin.HandlerFunc {
 			body = file.brBody
 		}
 
-		// Range 请求返回完整内容；服务端可以忽略 Range。
+		// 压缩表示的校验器必须区分编码：客户端换用不同 Accept-Encoding
+		// 重新协商时会得到不同的 ETag，从而重新拉取对应表示。
+		// 非哈希命名的文件没有校验器，始终返回完整内容。
 		header := c.Writer.Header()
+		if etag != "" {
+			etagVariant := `"` + etag + `-` + encoding + `"`
+			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+				if ifNoneMatchHit(c.Request.Header.Values("If-None-Match"), etagVariant) {
+					header.Set("ETag", etagVariant)
+					header.Set("Vary", "Accept-Encoding")
+					c.Writer.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+			header.Set("ETag", etagVariant)
+		}
+
+		// Range 请求返回完整内容；服务端可以忽略 Range。
 		header.Set("Content-Encoding", encoding)
 		header.Set("Vary", "Accept-Encoding")
 		header.Set("Content-Type", file.contentType)
