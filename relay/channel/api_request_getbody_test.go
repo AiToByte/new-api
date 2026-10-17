@@ -379,6 +379,14 @@ func runResetOnFirstStreamServer(ln net.Listener, expectRetry bool) <-chan h2Ser
 					return
 				}
 				if !expectRetry {
+					// Half-close and wait so the client reads the RST_STREAM
+					// frame before the socket teardown: an abrupt close with
+					// unread peer data sends a Windows RST that discards
+					// buffered frames.
+					if tcp, ok := conn.(*net.TCPConn); ok {
+						_ = tcp.CloseWrite()
+					}
+					time.Sleep(250 * time.Millisecond)
 					break attempts
 				}
 				continue
@@ -386,7 +394,15 @@ func runResetOnFirstStreamServer(ln net.Listener, expectRetry bool) <-chan h2Ser
 
 			if err := writeH2TestResponse(framer, streamID); err != nil {
 				res.err = err
+				return
 			}
+			// Half-close and wait so the client can read the response before
+			// the full close: an abrupt close with unread peer data sends a
+			// Windows RST that discards buffered frames mid-response.
+			if tcp, ok := conn.(*net.TCPConn); ok {
+				_ = tcp.CloseWrite()
+			}
+			time.Sleep(250 * time.Millisecond)
 			return
 		}
 	}()
@@ -416,19 +432,37 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 
 			if attempt == 0 {
 				err = framer.WriteGoAway(0, http2.ErrCodeNo, nil)
-				conn.Close()
 				if err != nil {
+					conn.Close()
 					res.err = err
 					return
 				}
+				// Half-close and wait so the client transport is guaranteed
+				// to read the GOAWAY frame: an abrupt close with unread data
+				// in the receive queue sends a Windows RST that preempts the
+				// graceful shutdown the transport is supposed to observe.
+				if tcp, ok := conn.(*net.TCPConn); ok {
+					_ = tcp.CloseWrite()
+				}
+				time.Sleep(250 * time.Millisecond)
+				conn.Close()
 				continue
 			}
 
 			err = writeH2TestResponse(framer, streamID)
-			conn.Close()
 			if err != nil {
+				conn.Close()
 				res.err = err
+				return
 			}
+			// Half-close and wait so the client can read the response before
+			// the full close: an abrupt close with unread peer data sends a
+			// Windows RST that discards buffered frames mid-response.
+			if tcp, ok := conn.(*net.TCPConn); ok {
+				_ = tcp.CloseWrite()
+			}
+			time.Sleep(250 * time.Millisecond)
+			conn.Close()
 			return
 		}
 	}()
