@@ -44,9 +44,22 @@ export default defineConfig(({ envMode }) => {
           enforce: true,
         },
         'vendor-tanstack': {
-          test: /node_modules[\\/]@tanstack[\\/]/,
+          // 路由与数据层：首屏同步图即需要（React 外壳、Query、Router），
+          // 保持为初始 vendor 块以获得稳定的长期缓存哈希。
+          test: /node_modules[\\/]@tanstack[\\/](react-router|router-core|react-query|query-core|react-store|store|history)[\\/]/,
           name: 'vendor-tanstack',
           chunks: 'all',
+          priority: 0,
+          enforce: true,
+        },
+        'vendor-tanstack-table': {
+          // 表格与表格内核只在少数异步路由（数据列表页）中用到。
+          // 限定 chunks: 'async'，避免它们被并入初始 vendor 块而进入首屏：
+          // 之前的单一 vendor-tanstack 组使用 chunks: 'all'，会把仅异步使用的
+          // table-core 合并进被首屏同步引用的块中，导致约 53KB 提前下发。
+          test: /node_modules[\\/]@tanstack[\\/](react-table|table-core)[\\/]/,
+          name: 'vendor-tanstack-table',
+          chunks: 'async',
           priority: 0,
           enforce: true,
         },
