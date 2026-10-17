@@ -97,6 +97,26 @@ export default defineConfig(({ envMode }) => {
             autoCodeSplitting: isProd,
           }),
         ],
+        // Production strips the identity entries of en.json (key === value),
+        // which i18next reproduces verbatim without the resource. The dev
+        // server keeps the full file so missingKey debug logging is unchanged.
+        module: {
+          rules: isProd
+            ? [
+                {
+                  test: /src[\\/]i18n[\\/]locales[\\/]en\.json$/,
+                  use: [
+                    {
+                      loader: path.resolve(
+                        __dirname,
+                        './scripts/en-slim-loader.cjs'
+                      ),
+                    },
+                  ],
+                },
+              ]
+            : [],
+        },
       },
     },
   }
