@@ -834,6 +834,14 @@ func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 		path := t.TempDir() + "/audit.db"
 		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		require.NoError(t, err)
+		// The shared cleanup below is only reached by the server-database
+		// branch; sqlite must also release its pool or Windows cannot remove
+		// the TempDir while the file is still open.
+		t.Cleanup(func() {
+			if sqlDB, err := db.DB(); err == nil {
+				_ = sqlDB.Close()
+			}
+		})
 		return db, path
 	}
 	require.NotEmpty(t, dsn)
@@ -1074,10 +1082,25 @@ func TestAuditDatabaseMatrix(t *testing.T) {
 						require.NoError(t, db.Create(&releasedAuditUser{Username: "released-owner", Password: "placeholder", AccessToken: &legacy, AffCode: "released-aff", Quota: 1234}).Error)
 						require.NoError(t, db.Create(&releasedAuditLog{UserId: 1, Type: model.LogTypeLogin, Content: "historical login", CreatedAt: 100, RequestId: "legacy-request"}).Error)
 					}
-					for range 2 {
+					for i := range 2 {
+						replaced := model.DB
 						require.NoError(t, model.InitDB())
 						require.NoError(t, model.InitLogDB())
+						if i > 0 && replaced != model.DB {
+							// InitDB replaced the previous pool; release it so
+							// Windows can remove the TempDir after the test.
+							if sqlDB, err := replaced.DB(); err == nil {
+								_ = sqlDB.Close()
+							}
+						}
 					}
+					t.Cleanup(func() {
+						for _, handle := range []*gorm.DB{model.DB, model.LOG_DB} {
+							if sqlDB, err := handle.DB(); err == nil {
+								_ = sqlDB.Close()
+							}
+						}
+					})
 					if !upgrade {
 						require.NoError(t, db.Create(&model.User{Username: "fresh-owner", Password: "placeholder", AffCode: "fresh-aff"}).Error)
 					}
@@ -1189,7 +1212,20 @@ func TestIndependentAuditLogStores(t *testing.T) {
 				t.Setenv("LOG_SQL_DSN", isolatedDSN)
 				t.Setenv("LOG_SQL_CLICKHOUSE_TTL_DAYS", "7")
 				require.NoError(t, model.InitLogDB())
+				replacedLog := model.LOG_DB
 				require.NoError(t, model.InitLogDB())
+				if replacedLog != model.LOG_DB {
+					// InitLogDB replaced the previous pool; release it so
+					// Windows can remove the TempDir after the test.
+					if sqlDB, err := replacedLog.DB(); err == nil {
+						_ = sqlDB.Close()
+					}
+				}
+				t.Cleanup(func() {
+					if sqlDB, err := model.LOG_DB.DB(); err == nil {
+						_ = sqlDB.Close()
+					}
+				})
 				if upgrade {
 					var old model.Log
 					require.NoError(t, model.LOG_DB.Where("request_id = ?", "legacy-split-request").Take(&old).Error)
