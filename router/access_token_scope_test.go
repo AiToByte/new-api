@@ -37,6 +37,9 @@ var accessTokenExemptRoutes = []string{
 	// Anonymous account entry points.
 	"GET /api/verification",
 	"GET /api/reset_password",
+	// Captcha generation for the login and register forms.
+	"GET /api/user/captcha",
+	"GET /api/user/captcha/slide",
 	"POST /api/user/reset",
 	"POST /api/user/register",
 	"GET /api/user/login/encryption-key",
