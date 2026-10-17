@@ -1,4 +1,3 @@
-import type { IconBaseProps, IconType } from 'react-icons'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { IconBaseProps, IconType } from 'react-icons'
 import { LuCreditCard } from 'react-icons/lu'
 import { SiAlipay, SiStripe, SiWechat } from 'react-icons/si'
 

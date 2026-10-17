@@ -1,15 +1,3 @@
-import type { ISpec } from '@visactor/vchart'
-import { registerAreaChart } from '@visactor/vchart/esm/chart/area/area'
-import { registerBarChart } from '@visactor/vchart/esm/chart/bar/bar'
-import { registerLineChart } from '@visactor/vchart/esm/chart/line/line'
-import { registerPieChart } from '@visactor/vchart/esm/chart/pie/pie'
-import { registerSankeyChart } from '@visactor/vchart/esm/chart/sankey/sankey'
-import { registerCartesianBandAxis } from '@visactor/vchart/esm/component/axis/cartesian/band-axis'
-import { registerCartesianLinearAxis } from '@visactor/vchart/esm/component/axis/cartesian/linear-axis'
-import { registerLabel } from '@visactor/vchart/esm/component/label/label'
-import { registerDiscreteLegend } from '@visactor/vchart/esm/component/legend/discrete/legend'
-import { registerTitle } from '@visactor/vchart/esm/component/title/title'
-import { registerTooltip } from '@visactor/vchart/esm/component/tooltip/tooltip'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -28,6 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { ISpec } from '@visactor/vchart'
+import { registerAreaChart } from '@visactor/vchart/esm/chart/area/area'
+import { registerBarChart } from '@visactor/vchart/esm/chart/bar/bar'
+import { registerLineChart } from '@visactor/vchart/esm/chart/line/line'
+import { registerPieChart } from '@visactor/vchart/esm/chart/pie/pie'
+import { registerSankeyChart } from '@visactor/vchart/esm/chart/sankey/sankey'
+import { registerCartesianBandAxis } from '@visactor/vchart/esm/component/axis/cartesian/band-axis'
+import { registerCartesianLinearAxis } from '@visactor/vchart/esm/component/axis/cartesian/linear-axis'
+import { registerLabel } from '@visactor/vchart/esm/component/label/label'
+import { registerDiscreteLegend } from '@visactor/vchart/esm/component/legend/discrete/legend'
+import { registerTitle } from '@visactor/vchart/esm/component/title/title'
+import { registerTooltip } from '@visactor/vchart/esm/component/tooltip/tooltip'
 import { VChart } from '@visactor/vchart/esm/core/vchart'
 import { registerAreaSeriesAnimation } from '@visactor/vchart/esm/series/area/animation'
 import { registerAreaSeries } from '@visactor/vchart/esm/series/area/area'
