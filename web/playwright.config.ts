@@ -20,6 +20,9 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  // 产物冒烟有独立配置（playwright.dist.config.ts）；从主 e2e 中排除，
+  // 避免它被 dev 服务器误跑。
+  testIgnore: /dist-smoke\.spec\.ts/,
   fullyParallel: true,
   timeout: 90000,
   expect: {

@@ -248,6 +248,14 @@ jobs:
       - name: Run E2E
         run: bun run test:e2e
 
+      # Guards the production-only build path (en-slim loader + chunk config),
+      # which the dev server above never exercises: build dist, serve it, smoke it.
+      - name: Build production frontend
+        run: bun run build
+
+      - name: Run production dist smoke
+        run: bun run test:dist-smoke
+
   layering-guard:
     name: Controller layering guard
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
