@@ -253,6 +253,12 @@ jobs:
       - name: Build production frontend
         run: bun run build
 
+      # Fails when the gzip size of the initial JS/CSS set referenced by
+      # dist/index.html exceeds the budgets in scripts/budget-check.mjs,
+      # so first-paint regressions surface in CI instead of production.
+      - name: Check first-paint size budget
+        run: bun run check:budget
+
       - name: Run production dist smoke
         run: bun run test:dist-smoke
 
