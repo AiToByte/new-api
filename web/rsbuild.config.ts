@@ -37,9 +37,13 @@ export default defineConfig(({ envMode }) => {
           enforce: true,
         },
         'vendor-ui-primitives': {
+          // 仅初始图用到的 base-ui/radix 模块才进首屏块。此前 chunks:'all' + enforce
+          // 会把仅异步路由用到的组件（combobox、dropdown-menu、数据表格里的浮层等）
+          // 一并强制并入这个初始 vendor 块，实测让首屏多承载了约三分之一的块体积；
+          // 改为 'initial' 后，async-only 模块回落到默认异步拆分，跟随所属路由块加载。
           test: /node_modules[\\/](@base-ui|@radix-ui)[\\/]/,
           name: 'vendor-ui-primitives',
-          chunks: 'all',
+          chunks: 'initial',
           priority: 0,
           enforce: true,
         },
