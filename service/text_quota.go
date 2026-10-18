@@ -407,10 +407,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		billingUsage = &dto.Usage{PromptTokens: summary.PromptTokens, CompletionTokens: summary.CompletionTokens, TotalTokens: summary.TotalTokens}
 	}
 	if billingUsage != nil {
-		var tieredUsedVars map[string]bool
-		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
-			tieredUsedVars = billingexpr.UsedVarsByHash(snap.ExprString, snap.ExprHash)
-		}
+		tieredUsedVars := resolveTieredUsedVars(relayInfo)
 		tieredTokens = BuildTieredTokenParams(billingUsage, summary.IsClaudeUsageSemantic, tieredUsedVars)
 		tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, tieredTokens)
 		if tieredOk {

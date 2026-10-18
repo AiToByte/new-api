@@ -294,10 +294,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		usage = &dto.Usage{PromptTokens: relayInfo.GetEstimatePromptTokens(), TotalTokens: relayInfo.GetEstimatePromptTokens()}
 	}
 
-	var tieredUsedVars map[string]bool
-	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
-		tieredUsedVars = billingexpr.UsedVarsByHash(snap.ExprString, snap.ExprHash)
-	}
+	tieredUsedVars := resolveTieredUsedVars(relayInfo)
 	var tieredResult *billingexpr.TieredResult
 	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, BuildTieredTokenParams(usage, false, tieredUsedVars))
 	if tieredOk {

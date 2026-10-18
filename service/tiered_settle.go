@@ -198,6 +198,24 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 	return nil
 }
 
+// resolveTieredUsedVars returns the expression variables referenced by the
+// request's frozen billing snapshot, or nil when the request is not
+// tiered-billed. Text and audio settlement share this exact guard; the other
+// settlement paths intentionally differ and must not be folded in here:
+//   - WSS passes raw P/C/Len because RealtimeUsage carries no cache/image/audio
+//     breakdown to normalize, so there is nothing for usedVars to subtract.
+//   - Task polling settles from plugin usage facts, not token params, through
+//     EvaluateTaskCompletionUsage — a different domain with its own barriers.
+func resolveTieredUsedVars(relayInfo *relaycommon.RelayInfo) map[string]bool {
+	if relayInfo == nil {
+		return nil
+	}
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		return billingexpr.UsedVarsByHash(snap.ExprString, snap.ExprHash)
+	}
+	return nil
+}
+
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
 // computes the actual quota using the captured BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies

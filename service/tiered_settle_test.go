@@ -1092,3 +1092,23 @@ func TestSamePriceCacheReadsRemainInInput(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveTieredUsedVars(t *testing.T) {
+	assert.Nil(t, resolveTieredUsedVars(nil))
+	assert.Nil(t, resolveTieredUsedVars(&relaycommon.RelayInfo{}))
+	assert.Nil(t, resolveTieredUsedVars(&relaycommon.RelayInfo{
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{BillingMode: "legacy_ratio"},
+	}))
+
+	vars := resolveTieredUsedVars(makeRelayInfo(cacheExpr, 1, 100, 50))
+	require.NotNil(t, vars)
+	assert.True(t, vars["cr"])
+	assert.True(t, vars["cc"])
+	assert.True(t, vars["cc1h"])
+	assert.False(t, vars["img"])
+	assert.False(t, vars["ai"])
+
+	flat := resolveTieredUsedVars(makeRelayInfo(flatExpr, 1, 100, 50))
+	require.NotNil(t, flat)
+	assert.False(t, flat["cr"])
+}
