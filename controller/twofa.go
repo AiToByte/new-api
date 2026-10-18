@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -110,11 +109,7 @@ func Get2FAStatus(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    status,
-	})
+	common.ApiSuccess(c, status)
 }
 
 // RegenerateBackupCodes 重新生成备用码
@@ -165,11 +160,7 @@ func Admin2FAStats(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    stats,
-	})
+	common.ApiSuccess(c, stats)
 }
 
 // AdminDisable2FA 管理员强制禁用用户2FA

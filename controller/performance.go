@@ -335,11 +335,7 @@ func CleanupLogFiles(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    result,
-	})
+	common.ApiSuccess(c, result)
 }
 
 // getDiskCacheInfo 获取磁盘缓存目录信息

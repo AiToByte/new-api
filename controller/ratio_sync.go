@@ -1141,9 +1141,5 @@ func GetSyncableChannels(c *gin.Context) {
 		Status:  1,
 	})
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    syncableChannels,
-	})
+	common.ApiSuccess(c, syncableChannels)
 }

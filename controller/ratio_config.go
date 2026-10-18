@@ -16,9 +16,5 @@ func GetRatioConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    billing_setting.GetPricingSyncData(map[string]any(ratio_setting.GetExposedData())),
-	})
+	common.ApiSuccess(c, billing_setting.GetPricingSyncData(map[string]any(ratio_setting.GetExposedData())))
 }

@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"net/http"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -108,5 +106,5 @@ func EmailBind(c *gin.Context) {
 		writeSecurityOperationError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"notification_warning": notificationFailed}})
+	common.ApiSuccess(c, gin.H{"notification_warning": notificationFailed})
 }

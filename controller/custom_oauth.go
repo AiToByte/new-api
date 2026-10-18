@@ -84,11 +84,7 @@ func GetCustomOAuthProviders(c *gin.Context) {
 		response[i] = toCustomOAuthProviderResponse(p)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    response,
-	})
+	common.ApiSuccess(c, response)
 }
 
 // GetCustomOAuthProvider returns a single custom OAuth provider by ID
@@ -106,11 +102,7 @@ func GetCustomOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    toCustomOAuthProviderResponse(provider),
-	})
+	common.ApiSuccess(c, toCustomOAuthProviderResponse(provider))
 }
 
 // CreateCustomOAuthProviderRequest is the request structure for creating a custom OAuth provider
@@ -202,13 +194,9 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"well_known_url": targetURL,
-			"discovery":      discovery,
-		},
+	common.ApiSuccess(c, gin.H{
+		"well_known_url": targetURL,
+		"discovery":      discovery,
 	})
 }
 
@@ -470,11 +458,7 @@ func GetUserOAuthBindings(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    response,
-	})
+	common.ApiSuccess(c, response)
 }
 
 func GetUserOAuthBindingsByAdmin(c *gin.Context) {
@@ -503,11 +487,7 @@ func GetUserOAuthBindingsByAdmin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    response,
-	})
+	common.ApiSuccess(c, response)
 }
 
 // UnbindCustomOAuth unbinds a custom OAuth provider from the current user

@@ -400,11 +400,7 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    user,
-	})
+	common.ApiSuccess(c, user)
 	return
 }
 
@@ -455,11 +451,7 @@ func GetAffCode(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    user.AffCode,
-	})
+	common.ApiSuccess(c, user.AffCode)
 	return
 }
 
@@ -479,11 +471,7 @@ func GetSelf(c *gin.Context) {
 	permissions["admin_permissions"] = authz.Capabilities(id, userRole)
 	responseData["permissions"] = permissions
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    responseData,
-	})
+	common.ApiSuccess(c, responseData)
 	return
 }
 
@@ -641,11 +629,7 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    service.GetGroupsEnabledModels(groupsToQuery),
-	})
+	common.ApiSuccess(c, service.GetGroupsEnabledModels(groupsToQuery))
 }
 
 func UpdateUser(c *gin.Context) {
@@ -777,143 +761,135 @@ func AdminClearUserBinding(c *gin.Context) {
 	})
 }
 
+// UpdateSelfRequest is the typed replacement for the former map[string]any
+// decode of the self-service profile endpoint. SidebarModules and Language
+// are pointers for presence detection: a JSON null decodes like an absent
+// key, and both fall through to the profile path (the same outcome as an
+// empty body today). A non-string value now fails decoding with
+// "Invalid parameters" instead of silently succeeding as a no-op.
+type UpdateSelfRequest struct {
+	Username         string  `json:"username" validate:"max=20"`
+	DisplayName      string  `json:"display_name" validate:"max=20"`
+	Password         string  `json:"password"`
+	OriginalPassword string  `json:"original_password"`
+	SidebarModules   *string `json:"sidebar_modules"`
+	Language         *string `json:"language"`
+}
+
 func UpdateSelf(c *gin.Context) {
-	var requestData map[string]any
-	if err := common.DecodeJson(c.Request.Body, &requestData); err != nil {
+	var req UpdateSelfRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 
-	passwordRequested := false
-	if value, exists := requestData["password"]; exists && value != nil {
-		password, isString := value.(string)
-		passwordRequested = !isString || password != ""
+	switch {
+	case req.Password != "":
+		updateSelfPassword(c, &req)
+	case req.SidebarModules != nil:
+		updateSelfSetting(c, func(setting *dto.UserSetting, value string) {
+			setting.SidebarModules = value
+		}, *req.SidebarModules)
+	case req.Language != nil:
+		updateSelfSetting(c, func(setting *dto.UserSetting, value string) {
+			setting.Language = value
+		}, *req.Language)
+	default:
+		updateSelfProfile(c, &req)
 	}
-	succeeded, notificationFailed := false, false
-	if passwordRequested {
-		defer func() {
-			recordUserSecurityAudit(c, c.GetInt("id"), "user.password_change", map[string]any{"success": succeeded, "notification_failed": notificationFailed})
-		}()
-	}
-	// 检查是否是用户设置更新请求 (sidebar_modules 或 language)
-	if sidebarModules, sidebarExists := requestData["sidebar_modules"]; sidebarExists && !passwordRequested {
-		userId := c.GetInt("id")
-		user, err := model.GetUserById(userId, false)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
+}
 
-		// 获取当前用户设置
-		currentSetting := user.GetSetting()
-
-		// 更新sidebar_modules字段
-		if sidebarModulesStr, ok := sidebarModules.(string); ok {
-			currentSetting.SidebarModules = sidebarModulesStr
-		}
-
-		if err := model.UpdateUserSetting(user.Id, currentSetting); err != nil {
-			common.ApiErrorT(c, "Update failed")
-			return
-		}
-
-		common.ApiSuccessT(c, "Update successful", nil)
-		return
-	}
-
-	// 检查是否是语言偏好更新请求
-	if language, langExists := requestData["language"]; langExists && !passwordRequested {
-		userId := c.GetInt("id")
-		user, err := model.GetUserById(userId, false)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-
-		// 获取当前用户设置
-		currentSetting := user.GetSetting()
-
-		// 更新language字段
-		if langStr, ok := language.(string); ok {
-			currentSetting.Language = langStr
-		}
-
-		if err := model.UpdateUserSetting(user.Id, currentSetting); err != nil {
-			common.ApiErrorT(c, "Update failed")
-			return
-		}
-
-		common.ApiSuccessT(c, "Update successful", nil)
-		return
-	}
-
-	// 原有的用户信息更新逻辑
-	var user model.User
-	requestDataBytes, err := common.Marshal(requestData)
+// updateSelfSetting applies one user-setting field for the self-service
+// endpoint. It preserves the historical per-field branches (sidebar_modules,
+// language) without duplicating the load-modify-save sequence.
+func updateSelfSetting(c *gin.Context, apply func(*dto.UserSetting, string), value string) {
+	userId := c.GetInt("id")
+	user, err := model.GetUserById(userId, false)
 	if err != nil {
-		common.ApiErrorT(c, "Invalid parameters")
-		return
-	}
-	if err = common.Unmarshal(requestDataBytes, &user); err != nil {
-		common.ApiErrorT(c, "Invalid parameters")
+		common.ApiError(c, err)
 		return
 	}
 
-	if err := common.Validate.StructExcept(&user, "Password"); err != nil {
+	// 获取当前用户设置
+	currentSetting := user.GetSetting()
+	apply(&currentSetting, value)
+
+	if err := model.UpdateUserSetting(user.Id, currentSetting); err != nil {
+		common.ApiErrorT(c, "Update failed")
+		return
+	}
+
+	common.ApiSuccessT(c, "Update successful", nil)
+}
+
+func updateSelfPassword(c *gin.Context, req *UpdateSelfRequest) {
+	succeeded, notificationFailed := false, false
+	defer func() {
+		recordUserSecurityAudit(c, c.GetInt("id"), "user.password_change", map[string]any{"success": succeeded, "notification_failed": notificationFailed})
+	}()
+
+	if err := common.Validate.StructExcept(req, "Password"); err != nil {
 		common.ApiErrorT(c, "Invalid input")
 		return
 	}
 
 	cleanUser := model.User{
 		Id:          c.GetInt("id"),
-		Username:    user.Username,
-		Password:    user.Password,
-		DisplayName: user.DisplayName,
+		Username:    req.Username,
+		Password:    req.Password,
+		DisplayName: req.DisplayName,
 	}
-	if user.Password != "" {
-		identity, ok := middleware.GetStepUpIdentity(c)
-		if !ok {
-			writeSecurityOperationError(c, service.ErrAuthTokenInvalid)
-			return
-		}
-		current, err := model.GetUserById(identity.UserID, true)
-		if err != nil {
-			writeSecurityOperationError(c, err)
-			return
-		}
-		firstPassword := current.Password == ""
-		scope := service.VerificationScopePasswordChange
-		if firstPassword {
-			scope = service.VerificationScopePasswordSet
-		}
-		if middleware.RequireSecurityProof(c, service.VerificationOperation{Scope: scope}) == nil {
-			return
-		}
-		cleanUser.OriginalPassword = user.OriginalPassword
-		if err := model.ChangeUserPassword(identity, &cleanUser, firstPassword); err != nil {
-			writeSecurityOperationError(c, err)
-			return
-		}
-		succeeded = true
-		notificationFailed = service.NotifyAccountSecurityChange(current.Email, "Password updated") != nil
-		if err := model.PublishUserAuthCache(cleanUser.Id); err != nil {
-			writeSecurityOperationError(c, err)
-			return
-		}
-		bundle, err := service.AdvanceCurrentSessionToUserVersion(identity, "password_changed")
-		if err != nil {
-			writeSecurityOperationError(c, err)
-			return
-		}
-		data := authRotationData(bundle)
-		data["has_password"] = true
-		data["notification_warning"] = notificationFailed
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data":    data,
-		})
+	identity, ok := middleware.GetStepUpIdentity(c)
+	if !ok {
+		writeSecurityOperationError(c, service.ErrAuthTokenInvalid)
 		return
+	}
+	current, err := model.GetUserById(identity.UserID, true)
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	firstPassword := current.Password == ""
+	scope := service.VerificationScopePasswordChange
+	if firstPassword {
+		scope = service.VerificationScopePasswordSet
+	}
+	if middleware.RequireSecurityProof(c, service.VerificationOperation{Scope: scope}) == nil {
+		return
+	}
+	cleanUser.OriginalPassword = req.OriginalPassword
+	if err := model.ChangeUserPassword(identity, &cleanUser, firstPassword); err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	succeeded = true
+	notificationFailed = service.NotifyAccountSecurityChange(current.Email, "Password updated") != nil
+	if err := model.PublishUserAuthCache(cleanUser.Id); err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	bundle, err := service.AdvanceCurrentSessionToUserVersion(identity, "password_changed")
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	data := authRotationData(bundle)
+	data["has_password"] = true
+	data["notification_warning"] = notificationFailed
+	common.ApiSuccess(c, data)
+}
+
+func updateSelfProfile(c *gin.Context, req *UpdateSelfRequest) {
+	if err := common.Validate.StructExcept(req, "Password"); err != nil {
+		common.ApiErrorT(c, "Invalid input")
+		return
+	}
+
+	cleanUser := model.User{
+		Id:          c.GetInt("id"),
+		Username:    req.Username,
+		Password:    req.Password,
+		DisplayName: req.DisplayName,
 	}
 	if err := cleanUser.Update(false); err != nil {
 		common.ApiError(c, err)
@@ -921,7 +897,6 @@ func UpdateSelf(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
-	return
 }
 
 func DeleteUser(c *gin.Context) {
@@ -988,11 +963,7 @@ func DeleteSelf(c *gin.Context) {
 	}
 	succeeded = true
 	service.ClearRefreshCookie(c)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    gin.H{},
-	})
+	common.ApiSuccess(c, gin.H{})
 }
 
 func CreateUser(c *gin.Context) {
@@ -1228,11 +1199,7 @@ func ManageUser(c *gin.Context) {
 		Role:   user.Role,
 		Status: user.Status,
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    clearUser,
-	})
+	common.ApiSuccess(c, clearUser)
 	return
 }
 
@@ -1307,11 +1274,7 @@ func TopUp(c *gin.Context) {
 		logger.LogError(c, common.LogText("failed to redeem key %s for user %d: %s", req.Key, id, err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    quota,
-	})
+	common.ApiSuccess(c, quota)
 }
 
 type UpdateUserSettingRequest struct {

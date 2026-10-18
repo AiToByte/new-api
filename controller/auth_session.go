@@ -31,16 +31,12 @@ func RefreshAuth(c *gin.Context) {
 		return
 	}
 	service.WriteRefreshCookie(c, bundle.RefreshToken)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"access_token":      bundle.AccessToken,
-			"token_type":        bundle.TokenType,
-			"access_expires_at": bundle.AccessExpiresAt,
-			"user":              buildSelfUserData(user),
-			"session":           bundle.Session,
-		},
+	common.ApiSuccess(c, gin.H{
+		"access_token":      bundle.AccessToken,
+		"token_type":        bundle.TokenType,
+		"access_expires_at": bundle.AccessExpiresAt,
+		"user":              buildSelfUserData(user),
+		"session":           bundle.Session,
 	})
 }
 
@@ -73,11 +69,7 @@ func AuthLogout(c *gin.Context) {
 				service.ClearRefreshCookie(c)
 				cookieCleared = true
 			}
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"message": "",
-				"data":    gin.H{"revoked_sid": identity.SessionID, "cookie_cleared": cookieCleared},
-			})
+			common.ApiSuccess(c, gin.H{"revoked_sid": identity.SessionID, "cookie_cleared": cookieCleared})
 			return
 		}
 	}
@@ -104,7 +96,7 @@ func GetLoginSessions(c *gin.Context) {
 		writeAuthSessionError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": sessions})
+	common.ApiSuccess(c, sessions)
 }
 
 func DeleteLoginSession(c *gin.Context) {
@@ -132,7 +124,7 @@ func DeleteLoginSession(c *gin.Context) {
 			service.ClearRefreshCookie(c)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"revoked_sid": sid, "current": sid == identity.SessionID}})
+	common.ApiSuccess(c, gin.H{"revoked_sid": sid, "current": sid == identity.SessionID})
 }
 
 func RevokeOtherLoginSessions(c *gin.Context) {
@@ -145,7 +137,7 @@ func RevokeOtherLoginSessions(c *gin.Context) {
 		writeAuthSessionError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"revoked_count": count}})
+	common.ApiSuccess(c, gin.H{"revoked_count": count})
 }
 
 func requireBrowserSession(c *gin.Context) (service.AuthIdentity, bool) {

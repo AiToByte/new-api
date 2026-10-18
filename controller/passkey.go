@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -104,14 +103,10 @@ func PasskeyRegisterBegin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"options":    creation,
-			"flow_token": flowToken,
-			"expires_at": expiresAt,
-		},
+	common.ApiSuccess(c, gin.H{
+		"options":    creation,
+		"flow_token": flowToken,
+		"expires_at": expiresAt,
 	})
 }
 
@@ -242,12 +237,8 @@ func PasskeyStatus(c *gin.Context) {
 
 	credential, err := model.GetPasskeyByUserID(user.Id)
 	if errors.Is(err, model.ErrPasskeyNotFound) {
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data": gin.H{
-				"enabled": false,
-			},
+		common.ApiSuccess(c, gin.H{
+			"enabled": false,
 		})
 		return
 	}
@@ -261,11 +252,7 @@ func PasskeyStatus(c *gin.Context) {
 		"last_used_at": credential.LastUsedAt,
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    data,
-	})
+	common.ApiSuccess(c, data)
 }
 
 func PasskeyLoginBegin(c *gin.Context) {
@@ -305,15 +292,11 @@ func PasskeyLoginBegin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"options":    assertion,
-			"rp_ids":     rpIDs,
-			"flow_token": flowToken,
-			"expires_at": expiresAt,
-		},
+	common.ApiSuccess(c, gin.H{
+		"options":    assertion,
+		"rp_ids":     rpIDs,
+		"flow_token": flowToken,
+		"expires_at": expiresAt,
 	})
 }
 
@@ -532,15 +515,11 @@ func PasskeyVerifyBegin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"options":    assertion,
-			"rp_ids":     rpIDs,
-			"flow_token": flowToken,
-			"expires_at": expiresAt,
-		},
+	common.ApiSuccess(c, gin.H{
+		"options":    assertion,
+		"rp_ids":     rpIDs,
+		"flow_token": flowToken,
+		"expires_at": expiresAt,
 	})
 }
 

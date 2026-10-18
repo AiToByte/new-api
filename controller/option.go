@@ -123,11 +123,7 @@ func GetOptions(c *gin.Context) {
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    options,
-	})
+	common.ApiSuccess(c, options)
 }
 
 type OptionUpdateRequest struct {

@@ -27,11 +27,7 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    task.ToResponse(),
-	})
+	common.ApiSuccess(c, task.ToResponse())
 }
 
 func GetCurrentSystemTask(c *gin.Context) {
@@ -50,19 +46,11 @@ func GetCurrentSystemTask(c *gin.Context) {
 		return
 	}
 	if task == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data":    nil,
-		})
+		common.ApiSuccess(c, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    task.ToResponse(),
-	})
+	common.ApiSuccess(c, task.ToResponse())
 }
 
 func ListSystemTasks(c *gin.Context) {
@@ -106,11 +94,7 @@ func DeleteSystemTaskHistory(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    gin.H{"deleted_count": deleted},
-	})
+	common.ApiSuccess(c, gin.H{"deleted_count": deleted})
 }
 
 func GetSystemTask(c *gin.Context) {
@@ -136,9 +120,5 @@ func GetSystemTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    task.ToResponse(),
-	})
+	common.ApiSuccess(c, task.ToResponse())
 }

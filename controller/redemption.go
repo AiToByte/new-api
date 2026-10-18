@@ -52,11 +52,7 @@ func GetRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    redemption,
-	})
+	common.ApiSuccess(c, redemption)
 	return
 }
 
@@ -120,11 +116,7 @@ func AddRedemption(c *gin.Context) {
 		"count": redemption.Count,
 		"quota": logger.FormatQuota(redemption.Quota),
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    keys,
-	})
+	common.ApiSuccess(c, keys)
 	return
 }
 
@@ -181,11 +173,7 @@ func UpdateRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    cleanRedemption,
-	})
+	common.ApiSuccess(c, cleanRedemption)
 	return
 }
 
@@ -195,11 +183,7 @@ func DeleteInvalidRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    rows,
-	})
+	common.ApiSuccess(c, rows)
 	return
 }
 

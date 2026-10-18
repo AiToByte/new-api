@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -23,11 +22,7 @@ func ListSystemInstances(c *gin.Context) {
 		responses = append(responses, instance.ToResponse(now))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    responses,
-	})
+	common.ApiSuccess(c, responses)
 }
 
 func DeleteStaleSystemInstances(c *gin.Context) {

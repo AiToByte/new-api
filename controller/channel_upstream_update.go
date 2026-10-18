@@ -913,19 +913,15 @@ func ApplyChannelUpstreamModelUpdates(c *gin.Context) {
 	recordManageAudit(c, "channel.upstream_apply", map[string]any{
 		"id": channel.Id,
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"id":                      channel.Id,
-			"added_models":            addedModels,
-			"removed_models":          removedModels,
-			"ignored_models":          ignoredModels,
-			"remaining_models":        remainingModels,
-			"remaining_remove_models": remainingRemoveModels,
-			"models":                  channel.Models,
-			"settings":                channel.OtherSettings,
-		},
+	common.ApiSuccess(c, gin.H{
+		"id":                      channel.Id,
+		"added_models":            addedModels,
+		"removed_models":          removedModels,
+		"ignored_models":          ignoredModels,
+		"remaining_models":        remainingModels,
+		"remaining_remove_models": remainingRemoveModels,
+		"models":                  channel.Models,
+		"settings":                channel.OtherSettings,
 	})
 }
 
@@ -959,17 +955,13 @@ func DetectChannelUpstreamModelUpdates(c *gin.Context) {
 		refreshChannelRuntimeCache()
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": detectChannelUpstreamModelUpdatesResult{
-			ChannelID:       channel.Id,
-			ChannelName:     channel.Name,
-			AddModels:       normalizeModelNames(settings.UpstreamModelUpdateLastDetectedModels),
-			RemoveModels:    normalizeModelNames(settings.UpstreamModelUpdateLastRemovedModels),
-			LastCheckTime:   settings.UpstreamModelUpdateLastCheckTime,
-			AutoAddedModels: autoAdded,
-		},
+	common.ApiSuccess(c, detectChannelUpstreamModelUpdatesResult{
+		ChannelID:       channel.Id,
+		ChannelName:     channel.Name,
+		AddModels:       normalizeModelNames(settings.UpstreamModelUpdateLastDetectedModels),
+		RemoveModels:    normalizeModelNames(settings.UpstreamModelUpdateLastRemovedModels),
+		LastCheckTime:   settings.UpstreamModelUpdateLastCheckTime,
+		AutoAddedModels: autoAdded,
 	})
 }
 
@@ -1111,16 +1103,12 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 	recordManageAudit(c, "channel.upstream_apply_all", map[string]any{
 		"count": len(results),
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"processed_channels": len(results),
-			"added_models":       addedModelCount,
-			"removed_models":     removedModelCount,
-			"failed_channel_ids": failed,
-			"results":            results,
-		},
+	common.ApiSuccess(c, gin.H{
+		"processed_channels": len(results),
+		"added_models":       addedModelCount,
+		"removed_models":     removedModelCount,
+		"failed_channel_ids": failed,
+		"results":            results,
 	})
 }
 
@@ -1149,12 +1137,8 @@ func DetectAllChannelUpstreamModelUpdates(c *gin.Context) {
 	recordManageAudit(c, "channel.upstream_detect_all", map[string]any{
 		"task_id": task.TaskID,
 	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": gin.H{
-			"task_id": task.TaskID,
-			"status":  task.Status,
-		},
+	common.ApiSuccess(c, gin.H{
+		"task_id": task.TaskID,
+		"status":  task.Status,
 	})
 }

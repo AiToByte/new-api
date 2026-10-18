@@ -134,11 +134,7 @@ func GenerateOAuthCode(c *gin.Context) {
 	if flowPayload.Telegram != nil {
 		data["authorization_url"] = flowPayload.Telegram.AuthorizationURL(state)
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    data,
-	})
+	common.ApiSuccess(c, data)
 }
 
 // HandleOAuth handles OAuth callback for all standard OAuth providers
