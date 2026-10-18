@@ -74,23 +74,14 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError
 	}
 	adaptor.Init(info)
 
-	resp, err := adaptor.DoRequest(c, info, body)
-	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	httpResp, sendErr := SendUpstream(c, info, adaptor, body, AcceptStatus2xx)
+	if sendErr != nil {
+		return sendErr
 	}
-
-	statusCodeMappingStr := c.GetString("status_code_mapping")
-	httpResp, ok := resp.(*http.Response)
-	if !ok || httpResp == nil {
+	if httpResp == nil {
 		return types.NewOpenAIError(errors.New("invalid http response"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-		return newAPIError
-	}
 
 	if contentType := httpResp.Header.Get("Content-Type"); contentType != "" {
 		c.Writer.Header().Set("Content-Type", contentType)
