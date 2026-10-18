@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/ast"
@@ -118,10 +117,8 @@ type cachedEntry struct {
 	fixedPricing  bool
 }
 
-var (
-	cacheMu sync.RWMutex
-	cache   = make(map[string]*cachedEntry, 64)
-)
+// exprProgramCache holds compiled expressions across requests (see lru_cache.go).
+var exprProgramCache = newExprCache(maxCacheSize)
 
 // compileEnvPrototypeV1 is the v1 type-checking prototype used at compile time.
 var compileEnvPrototypeV1 = map[string]any{
@@ -185,12 +182,9 @@ func compileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {
 }
 
 func compileEntryFromCacheByHash(exprStr, hash string) (*cachedEntry, error) {
-	cacheMu.RLock()
-	if entry, ok := cache[hash]; ok {
-		cacheMu.RUnlock()
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry, nil
 	}
-	cacheMu.RUnlock()
 
 	version, body := ParseExprVersion(exprStr)
 	// Validate before optimization so unreachable fixed-price branches cannot
@@ -225,12 +219,7 @@ func compileEntryFromCacheByHash(exprStr, hash string) (*cachedEntry, error) {
 		version:       version,
 		fixedPricing:  fixedPricing,
 	}
-	cacheMu.Lock()
-	if len(cache) >= maxCacheSize {
-		cache = make(map[string]*cachedEntry, 64)
-	}
-	cache[hash] = entry
-	cacheMu.Unlock()
+	exprProgramCache.add(hash, entry)
 
 	return entry, nil
 }
@@ -242,12 +231,9 @@ func ExprVersion(exprStr string) int {
 		return DefaultExprVersion
 	}
 	hash := ExprHashString(exprStr)
-	cacheMu.RLock()
-	if entry, ok := cache[hash]; ok {
-		cacheMu.RUnlock()
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry.version
 	}
-	cacheMu.RUnlock()
 	v, _ := ParseExprVersion(exprStr)
 	return v
 }
@@ -300,21 +286,15 @@ func UsedVarsByHash(exprStr, hash string) map[string]bool {
 	if exprStr == "" {
 		return nil
 	}
-	cacheMu.RLock()
-	if entry, ok := cache[hash]; ok {
-		cacheMu.RUnlock()
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry.usedVars
 	}
-	cacheMu.RUnlock()
 
 	// Compile (and cache) to populate usedVars
 	if _, err := compileFromCacheByHash(exprStr, hash); err != nil {
 		return nil
 	}
-	cacheMu.RLock()
-	entry, ok := cache[hash]
-	cacheMu.RUnlock()
-	if ok {
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry.usedVars
 	}
 	return nil
@@ -328,20 +308,14 @@ func UsedUsageKeys(exprStr string) map[string]bool {
 		return nil
 	}
 	hash := ExprHashString(exprStr)
-	cacheMu.RLock()
-	if entry, ok := cache[hash]; ok {
-		cacheMu.RUnlock()
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry.usedUsageKeys
 	}
-	cacheMu.RUnlock()
 
 	if _, err := compileFromCacheByHash(exprStr, hash); err != nil {
 		return nil
 	}
-	cacheMu.RLock()
-	entry, ok := cache[hash]
-	cacheMu.RUnlock()
-	if ok {
+	if entry, ok := exprProgramCache.get(hash); ok {
 		return entry.usedUsageKeys
 	}
 	return nil
@@ -350,7 +324,5 @@ func UsedUsageKeys(exprStr string) map[string]bool {
 // InvalidateCache clears the compiled-expression cache.
 // Called when billing rules are updated.
 func InvalidateCache() {
-	cacheMu.Lock()
-	cache = make(map[string]*cachedEntry, 64)
-	cacheMu.Unlock()
+	exprProgramCache.clear()
 }
