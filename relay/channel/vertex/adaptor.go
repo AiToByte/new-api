@@ -50,6 +50,7 @@ var claudeModelMap = map[string]string{
 const anthropicVersion = "vertex-2023-10-16"
 
 type Adaptor struct {
+	channel.BaseAdaptor
 	RequestMode        int
 	AccountCredentials Credentials
 }
@@ -105,11 +106,6 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 	vertexClaudeReq := copyRequest(request, anthropicVersion)
 	return vertexClaudeReq, nil
-}
-
-func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	//TODO implement me
-	return nil, errors.New("not implemented")
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {

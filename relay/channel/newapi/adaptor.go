@@ -18,6 +18,7 @@ import (
 )
 
 type Adaptor struct {
+	channel.BaseAdaptor
 	openaiAdaptor openai.Adaptor
 	claudeAdaptor claude.Adaptor
 	geminiAdaptor gemini.Adaptor

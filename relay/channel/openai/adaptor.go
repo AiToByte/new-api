@@ -38,6 +38,7 @@ import (
 )
 
 type Adaptor struct {
+	channel.BaseAdaptor
 	ChannelType    int
 	ResponseFormat string
 }

@@ -28,6 +28,7 @@ const ChannelName = "advanced_custom"
 const advancedCustomModelPlaceholder = "{model}"
 
 type Adaptor struct {
+	channel.BaseAdaptor
 	openaiAdaptor openai.Adaptor
 	claudeAdaptor claude.Adaptor
 	geminiAdaptor gemini.Adaptor

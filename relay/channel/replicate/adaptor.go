@@ -26,9 +26,7 @@ import (
 )
 
 type Adaptor struct {
-}
-
-func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
+	channel.BaseAdaptor
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {

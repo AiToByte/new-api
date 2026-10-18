@@ -17,22 +17,12 @@ import (
 )
 
 type Adaptor struct {
-}
-
-func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *common.RelayInfo, *dto.GeminiChatRequest) (any, error) {
-	//TODO implement me
-	return nil, errors.New("not implemented")
+	channel.BaseAdaptor
 }
 
 // ConvertAudioRequest implements channel.Adaptor.
-func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *common.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	return nil, errors.New("not implemented")
-}
 
 // ConvertClaudeRequest implements channel.Adaptor.
-func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *common.RelayInfo, request *dto.ClaudeRequest) (any, error) {
-	return nil, errors.New("not implemented")
-}
 
 // ConvertEmbeddingRequest implements channel.Adaptor.
 func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *common.RelayInfo, request dto.EmbeddingRequest) (any, error) {
@@ -40,9 +30,6 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *common.RelayInfo
 }
 
 // ConvertImageRequest implements channel.Adaptor.
-func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *common.RelayInfo, request dto.ImageRequest) (any, error) {
-	return nil, errors.New("not implemented")
-}
 
 // ConvertOpenAIRequest implements channel.Adaptor.
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *common.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
@@ -127,9 +114,6 @@ func (a *Adaptor) GetRequestURL(info *common.RelayInfo) (string, error) {
 }
 
 // Init implements channel.Adaptor.
-func (a *Adaptor) Init(info *common.RelayInfo) {
-
-}
 
 // SetupRequestHeader implements channel.Adaptor.
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *common.RelayInfo) error {
