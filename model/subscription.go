@@ -386,6 +386,60 @@ func GetSubscriptionPlanById(id int) (*SubscriptionPlan, error) {
 	return getSubscriptionPlanByIdTx(nil, id)
 }
 
+// CreateSubscriptionPlan inserts a new plan. BeforeCreate stamps timestamps.
+func CreateSubscriptionPlan(plan *SubscriptionPlan) error {
+	if plan == nil {
+		return errors.New("invalid plan")
+	}
+	return DB.Create(plan).Error
+}
+
+// UpdateSubscriptionPlan applies admin-edited fields onto the stored row.
+// The map-based update writes zero values intentionally; updated_at is set
+// explicitly because BeforeUpdate only stamps the model, not the map.
+// A single UPDATE statement is atomic; no explicit transaction is needed.
+func UpdateSubscriptionPlan(plan *SubscriptionPlan) error {
+	if plan == nil || plan.Id <= 0 {
+		return errors.New("invalid plan id")
+	}
+	updateMap := map[string]any{
+		"title":                      plan.Title,
+		"subtitle":                   plan.Subtitle,
+		"price_amount":               plan.PriceAmount,
+		"currency":                   plan.Currency,
+		"duration_unit":              plan.DurationUnit,
+		"duration_value":             plan.DurationValue,
+		"custom_seconds":             plan.CustomSeconds,
+		"enabled":                    plan.Enabled,
+		"sort_order":                 plan.SortOrder,
+		"stripe_price_id":            plan.StripePriceId,
+		"creem_product_id":           plan.CreemProductId,
+		"waffo_pancake_product_id":   plan.WaffoPancakeProductId,
+		"max_purchase_per_user":      plan.MaxPurchasePerUser,
+		"total_amount":               plan.TotalAmount,
+		"upgrade_group":              plan.UpgradeGroup,
+		"downgrade_group":            plan.DowngradeGroup,
+		"quota_reset_period":         plan.QuotaResetPeriod,
+		"quota_reset_custom_seconds": plan.QuotaResetCustomSeconds,
+		"updated_at":                 common.GetTimestamp(),
+	}
+	if plan.AllowBalancePay != nil {
+		updateMap["allow_balance_pay"] = *plan.AllowBalancePay
+	}
+	if plan.AllowWalletOverflow != nil {
+		updateMap["allow_wallet_overflow"] = *plan.AllowWalletOverflow
+	}
+	return DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(updateMap).Error
+}
+
+// UpdateSubscriptionPlanStatus flips only the enabled flag of a plan.
+func UpdateSubscriptionPlanStatus(id int, enabled bool) error {
+	if id <= 0 {
+		return errors.New("invalid plan id")
+	}
+	return DB.Model(&SubscriptionPlan{}).Where("id = ?", id).Update("enabled", enabled).Error
+}
+
 func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
 	if id <= 0 {
 		return nil, errors.New("invalid plan id")
