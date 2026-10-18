@@ -314,3 +314,146 @@ func TestImageHelperKeepsAdaptorClassifiedConvertError(t *testing.T) {
 	assert.True(t, types.IsSkipRetryError(apiErr), "other channels must not be asked to serve the same name")
 	assert.Contains(t, apiErr.Error(), "not served by the alibaba task plugin")
 }
+
+// A Claude-format request sent to a channel whose adaptor does not implement
+// the Claude conversion must surface a classified error instead of panicking.
+// Before the D2 fix, zhipu-class adaptors hit panic("implement me"), which the
+// controller recover turned into a 500 with the panic text leaked to clients.
+// Locked behavior: ErrorCodeConvertRequestFailed + skip-retry. If a future
+// decision makes unsupported conversions retryable across channels, update
+// this test deliberately.
+func TestClaudeHelperUnsupportedConversionIsClassifiedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeZhipu)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "claude-3-5-sonnet-20241022")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-3-5-sonnet-20241022",
+		Request: &dto.ClaudeRequest{
+			Model:    "claude-3-5-sonnet-20241022",
+			Messages: []dto.ClaudeMessage{{Role: "user", Content: "hello"}},
+		},
+	}
+
+	apiErr := ClaudeHelper(c, info)
+
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+	assert.Equal(t, types.ErrorCodeConvertRequestFailed, apiErr.GetErrorCode())
+	assert.True(t, types.IsSkipRetryError(apiErr), "unsupported conversion must not rotate to other channels")
+	assert.Contains(t, apiErr.Error(), "not implemented")
+}
+
+// Non-2xx upstream responses must flow through the shared chain:
+// RelayErrorHandler maps the body, then ResetStatusCode applies the channel's
+// status_code_mapping. This locks the composition at handler level so the
+// Phase 1 SendUpstream extraction cannot silently drop either step.
+func TestTextHelperAppliesStatusCodeMappingOnUpstreamError(t *testing.T) {
+	service.InitHttpClient()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"fixture rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set("status_code_mapping", `{"429":"503"}`)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-4o-mini")
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "gpt-4o-mini",
+		RequestURLPath:  "/v1/chat/completions",
+		Request: &dto.GeneralOpenAIRequest{
+			Model:    "gpt-4o-mini",
+			Messages: []dto.Message{{Role: "user", Content: "hello"}},
+			Stream:   common.GetPointer(false),
+		},
+	}
+
+	apiErr := TextHelper(c, info)
+
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+	assert.Contains(t, apiErr.Error(), "fixture rate limited")
+}
+
+// SendUpstream is the single seam for one upstream attempt. Lock its contract:
+// transport errors map like the old per-handler blocks, non-accepted statuses
+// flow through RelayErrorHandler + status_code_mapping, and the accept policy
+// alone decides the boundary (201 is an error under OK, success under 2xx).
+func TestSendUpstreamPolicies(t *testing.T) {
+	service.InitHttpClient()
+	newUpstream := func(status int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, `{"error":{"message":"fixture upstream failure","type":"upstream_error"}}`)
+		}))
+	}
+
+	for _, tc := range []struct {
+		name           string
+		status         int
+		mapping        string
+		policy         AcceptUpstreamStatus
+		expectedStatus int
+		expectResp     bool
+	}{
+		{name: "429 mapped under OK policy", status: http.StatusTooManyRequests, mapping: `{"429":"503"}`, policy: AcceptStatusOK, expectedStatus: http.StatusServiceUnavailable},
+		{name: "429 mapped under 2xx policy", status: http.StatusTooManyRequests, mapping: `{"429":"503"}`, policy: AcceptStatus2xx, expectedStatus: http.StatusServiceUnavailable},
+		{name: "201 rejected under OK policy", status: http.StatusCreated, mapping: "", policy: AcceptStatusOK, expectedStatus: http.StatusCreated},
+		{name: "201 accepted under 2xx policy", status: http.StatusCreated, mapping: "", policy: AcceptStatus2xx, expectResp: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newUpstream(tc.status)
+			t.Cleanup(upstream.Close)
+
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			// DoApiRequest closes c.Request.Body unconditionally; a nil body
+			// panics exactly like a malformed gin context would in production.
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+			if tc.mapping != "" {
+				c.Set("status_code_mapping", tc.mapping)
+			}
+			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-4o-mini")
+
+			info := &relaycommon.RelayInfo{
+				RelayMode:       relayconstant.RelayModeChatCompletions,
+				OriginModelName: "gpt-4o-mini",
+				RequestURLPath:  "/v1/chat/completions",
+			}
+			info.InitChannelMeta(c)
+
+			adaptor := GetAdaptor(constant.APITypeOpenAI)
+			require.NotNil(t, adaptor)
+
+			// Handlers never pass a nil body (DoApiRequest closes the
+			// outbound request body unconditionally); mirror that here.
+			httpResp, apiErr := SendUpstream(c, info, adaptor, strings.NewReader("{}"), tc.policy)
+			if tc.expectResp {
+				require.Nil(t, apiErr)
+				require.NotNil(t, httpResp)
+				assert.Equal(t, tc.status, httpResp.StatusCode)
+				require.NoError(t, httpResp.Body.Close())
+				return
+			}
+			require.Nil(t, httpResp)
+			require.NotNil(t, apiErr)
+			assert.Equal(t, tc.expectedStatus, apiErr.StatusCode)
+			assert.Contains(t, apiErr.Error(), "fixture upstream failure")
+		})
+	}
+}
