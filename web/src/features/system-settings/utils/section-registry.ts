@@ -74,7 +74,12 @@ export function createSectionRegistry<
   }
 
   /**
-   * Get section content by section ID
+   * Get section content by section ID.
+   *
+   * Section components are React.lazy() chunks (see the per-group
+   * section-registry files), so callers must render the result inside a
+   * Suspense boundary. Navigation metadata (getSectionNavItems/getSectionMeta)
+   * never touches component code and stays synchronous.
    */
   function getSectionContent(
     sectionId: SectionId,
