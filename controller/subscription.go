@@ -34,8 +34,8 @@ func GetSubscriptionPlans(c *gin.Context) {
 		return
 	}
 
-	var plans []model.SubscriptionPlan
-	if err := model.DB.Where("enabled = ?", true).Order("sort_order desc, id desc").Find(&plans).Error; err != nil {
+	plans, err := service.ListEnabledSubscriptionPlans()
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -118,8 +118,8 @@ func SubscriptionRequestBalancePay(c *gin.Context) {
 // ---- Admin APIs ----
 
 func AdminListSubscriptionPlans(c *gin.Context) {
-	var plans []model.SubscriptionPlan
-	if err := model.DB.Order("sort_order desc, id desc").Find(&plans).Error; err != nil {
+	plans, err := service.ListSubscriptionPlans()
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}

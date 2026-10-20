@@ -382,6 +382,21 @@ func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) in
 	return next.Unix()
 }
 
+// ListSubscriptionPlans returns all plans ordered for admin listing.
+func ListSubscriptionPlans() ([]SubscriptionPlan, error) {
+	var plans []SubscriptionPlan
+	err := DB.Order("sort_order desc, id desc").Find(&plans).Error
+	return plans, err
+}
+
+// ListEnabledSubscriptionPlans returns enabled plans ordered for the
+// user-facing plan list.
+func ListEnabledSubscriptionPlans() ([]SubscriptionPlan, error) {
+	var plans []SubscriptionPlan
+	err := DB.Where("enabled = ?", true).Order("sort_order desc, id desc").Find(&plans).Error
+	return plans, err
+}
+
 func GetSubscriptionPlanById(id int) (*SubscriptionPlan, error) {
 	return getSubscriptionPlanByIdTx(nil, id)
 }

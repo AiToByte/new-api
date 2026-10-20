@@ -22,3 +22,13 @@ func UpdateSubscriptionPlan(plan *model.SubscriptionPlan) error {
 func UpdateSubscriptionPlanStatus(id int, enabled bool) error {
 	return model.UpdateSubscriptionPlanStatus(id, enabled)
 }
+
+// ListSubscriptionPlans returns all plans ordered for admin listing.
+func ListSubscriptionPlans() ([]model.SubscriptionPlan, error) {
+	return model.ListSubscriptionPlans()
+}
+
+// ListEnabledSubscriptionPlans returns enabled plans for the user-facing list.
+func ListEnabledSubscriptionPlans() ([]model.SubscriptionPlan, error) {
+	return model.ListEnabledSubscriptionPlans()
+}
