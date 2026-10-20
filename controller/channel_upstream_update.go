@@ -503,13 +503,7 @@ func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string)
 
 func updateChannelUpstreamModelSettings(channel *model.Channel, settings dto.ChannelOtherSettings, updateModels bool) error {
 	channel.SetOtherSettings(settings)
-	updates := map[string]any{
-		"settings": channel.OtherSettings,
-	}
-	if updateModels {
-		updates["models"] = channel.Models
-	}
-	return model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Updates(updates).Error
+	return service.UpdateChannelUpstreamModelSettings(channel, updateModels)
 }
 
 func checkAndPersistChannelUpstreamModelUpdates(
@@ -721,8 +715,8 @@ func runChannelUpstreamModelUpdateTaskOnce(ctx context.Context, force bool, allo
 	// Count the enabled channels up front so progress can be reported as a
 	// percentage; a count error is non-fatal (progress just won't show a %).
 	var totalChannels int64
-	if err := model.DB.Model(&model.Channel{}).Where("status = ?", common.ChannelStatusEnabled).Count(&totalChannels).Error; err != nil {
-		totalChannels = 0
+	if counted, err := service.CountEnabledChannels(); err == nil {
+		totalChannels = counted
 	}
 	processed := 0
 
@@ -732,16 +726,7 @@ scanLoop:
 		if ctx != nil && ctx.Err() != nil {
 			break
 		}
-		var channels []*model.Channel
-		query := model.DB.
-			Select(channelUpstreamModelUpdateSelectFields).
-			Where("status = ?", common.ChannelStatusEnabled).
-			Order("id asc").
-			Limit(channelUpstreamModelUpdateTaskBatchSize)
-		if lastID > 0 {
-			query = query.Where("id > ?", lastID)
-		}
-		err := query.Find(&channels).Error
+		channels, err := findEnabledChannelsAfterID(lastID, channelUpstreamModelUpdateTaskBatchSize)
 		if err != nil {
 			common.SysLog(common.LogText("upstream model update task query failed: %v", err))
 			break
@@ -1020,16 +1005,7 @@ func collectPendingApplyUpstreamModelChanges(settings dto.ChannelOtherSettings) 
 }
 
 func findEnabledChannelsAfterID(lastID int, batchSize int) ([]*model.Channel, error) {
-	var channels []*model.Channel
-	query := model.DB.
-		Select(channelUpstreamModelUpdateSelectFields).
-		Where("status = ?", common.ChannelStatusEnabled).
-		Order("id asc").
-		Limit(batchSize)
-	if lastID > 0 {
-		query = query.Where("id > ?", lastID)
-	}
-	return channels, query.Find(&channels).Error
+	return service.ListEnabledChannelsForUpstreamUpdate(channelUpstreamModelUpdateSelectFields, lastID, batchSize)
 }
 
 func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
