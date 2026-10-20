@@ -34,6 +34,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getDeployment, listDeploymentContainers } from '../../api'
+import { deploymentDetailsQueryKeys } from '../../lib'
 
 export function ViewDetailsDialog({
   open,
@@ -52,7 +53,7 @@ export function ViewDetailsDialog({
     refetch: refetchDetails,
     isFetching: isFetchingDetails,
   } = useQuery({
-    queryKey: ['deployment-details', deploymentId],
+    queryKey: deploymentDetailsQueryKeys.detail(deploymentId),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId ? getDeployment(deploymentId) : null)
@@ -66,7 +67,7 @@ export function ViewDetailsDialog({
     refetch: refetchContainers,
     isFetching: isFetchingContainers,
   } = useQuery({
-    queryKey: ['deployment-details-containers', deploymentId],
+    queryKey: deploymentDetailsQueryKeys.detailsContainers(deploymentId),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId ? listDeploymentContainers(deploymentId) : null)

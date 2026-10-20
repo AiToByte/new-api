@@ -22,11 +22,13 @@ import userEvent from '@testing-library/user-event'
 import { AxiosError } from 'axios'
 import { describe, expect, it, vi } from 'vitest'
 
+import { pricingQueryKeys } from '@/features/pricing/lib/query-keys'
 import { api } from '@/lib/api'
 
 import { VendorMutateDialog } from '../components/dialogs/vendor-mutate-dialog'
 import { VendorOperationDialog } from '../components/dialogs/vendor-operation-dialog'
 import { VendorLinkedModels } from '../components/vendor-linked-models'
+import { modelsQueryKeys, vendorsQueryKeys } from '../lib/query-keys'
 
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
@@ -173,8 +175,12 @@ describe('vendor management', () => {
         expected_version: 'preview-v2',
       },
     ])
-    for (const key of ['vendors', 'models', 'pricing']) {
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] })
+    for (const queryKey of [
+      vendorsQueryKeys.all,
+      modelsQueryKeys.all,
+      pricingQueryKeys.all,
+    ]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey })
     }
   })
   it('requires an explicit merge target and previews only the remaining source vendors', async () => {

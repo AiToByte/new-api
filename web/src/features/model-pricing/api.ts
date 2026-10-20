@@ -24,16 +24,20 @@ import {
 } from '@tanstack/react-query'
 import { t } from 'i18next'
 
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
+import { pricingQueryKeys } from '@/features/pricing/lib/query-keys'
 import type {
   BillingUsageSchema,
   BillingUsageExample,
 } from '@/features/pricing/types'
 import { api } from '@/lib/api'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { ROLE } from '@/lib/roles'
 import { createServerError } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { modelPricingQueryKeys } from './lib/query-keys'
 import {
   PRICING_KEYS,
   pricingValuesByModel,
@@ -138,7 +142,7 @@ export async function getModelPricing(
 export function useModelPricing(names: string[] = [], enabled = true) {
   const canEdit = useCanEditModelPricing()
   return useQuery({
-    queryKey: ['model-pricing-config', ...names],
+    queryKey: modelPricingQueryKeys.configFor(names),
     queryFn: () => getModelPricing(names),
     enabled: enabled && canEdit,
     refetchOnWindowFocus: false,
@@ -147,11 +151,11 @@ export function useModelPricing(names: string[] = [], enabled = true) {
 
 export async function invalidateModelPricing(client: QueryClient) {
   await Promise.all([
-    client.invalidateQueries({ queryKey: ['model-pricing-config'] }),
-    client.invalidateQueries({ queryKey: ['model-pricing-preview'] }),
-    client.invalidateQueries({ queryKey: ['system-options'] }),
-    client.invalidateQueries({ queryKey: ['pricing'] }),
-    client.invalidateQueries({ queryKey: ['models'] }),
+    client.invalidateQueries({ queryKey: modelPricingQueryKeys.config }),
+    client.invalidateQueries({ queryKey: modelPricingQueryKeys.preview }),
+    client.invalidateQueries({ queryKey: globalQueryKeys.systemOptions }),
+    client.invalidateQueries({ queryKey: pricingQueryKeys.all }),
+    client.invalidateQueries({ queryKey: modelsQueryKeys.all }),
   ])
 }
 

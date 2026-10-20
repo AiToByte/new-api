@@ -27,6 +27,7 @@ import { Markdown } from '@/components/ui/markdown'
 
 import { findMarketplaceVersion } from '../lib/marketplace'
 import { changelogLocale, fetchPluginChangelog } from '../lib/plugin-changelog'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { MarketplacePlugin } from '../types'
 
 type PluginChangelogPanelProps = {
@@ -40,15 +41,14 @@ export function PluginChangelogPanel(props: PluginChangelogPanelProps) {
   const locale = changelogLocale(i18n.language)
   const entry = findMarketplaceVersion(props.plugin, props.version)
   const query = useQuery({
-    queryKey: [
-      'task-plugin-marketplace-changelog',
+    queryKey: taskPluginsQueryKeys.marketplaceChangelog(
       props.indexUrl,
       props.plugin.key,
       props.version,
       entry?.path,
       entry?.sha256,
-      locale,
-    ],
+      locale
+    ),
     queryFn: ({ signal }) =>
       fetchPluginChangelog({ ...props, language: locale, signal }),
     staleTime: 15 * 60 * 1000,

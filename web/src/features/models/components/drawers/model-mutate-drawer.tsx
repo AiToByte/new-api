@@ -64,6 +64,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelPricingPanel } from '@/features/model-pricing/model-pricing-panel'
+import { pricingQueryKeys } from '@/features/pricing/lib/query-keys'
 import {
   requireServerSuccess,
   createServerError,
@@ -217,7 +218,7 @@ export function ModelMutateDrawer(props: {
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: modelsQueryKeys.all }),
-        queryClient.invalidateQueries({ queryKey: ['pricing'] }),
+        queryClient.invalidateQueries({ queryKey: pricingQueryKeys.all }),
         queryClient.invalidateQueries({ queryKey: vendorsQueryKeys.all }),
       ])
       toast.success(t('Model metadata saved'))

@@ -30,7 +30,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { estimatePrice, extendDeployment, getDeployment } from '../../api'
-import { deploymentsQueryKeys } from '../../lib'
+import { deploymentDetailsQueryKeys, deploymentsQueryKeys } from '../../lib'
 
 function toInt(value: unknown, fallback: number) {
   const n = typeof value === 'number' ? value : Number(value)
@@ -56,7 +56,7 @@ export function ExtendDeploymentDialog({
   }, [open])
 
   const { data: detailsRes, isLoading: isLoadingDetails } = useQuery({
-    queryKey: ['deployment-details-for-extend', deploymentId],
+    queryKey: deploymentDetailsQueryKeys.forExtend(deploymentId),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId ? getDeployment(deploymentId) : null)
@@ -101,7 +101,11 @@ export function ExtendDeploymentDialog({
     isLoading: isLoadingPrice,
     isFetching: isFetchingPrice,
   } = useQuery({
-    queryKey: ['deployment-extend-price', deploymentId, hours, priceParams],
+    queryKey: deploymentDetailsQueryKeys.extendPrice(
+      deploymentId,
+      hours,
+      priceParams
+    ),
     queryFn: async () =>
       requireServerSuccess(
         await (priceParams
@@ -154,7 +158,9 @@ export function ExtendDeploymentDialog({
         queryClient.invalidateQueries({
           queryKey: deploymentsQueryKeys.lists(),
         })
-        queryClient.invalidateQueries({ queryKey: ['deployment-details'] })
+        queryClient.invalidateQueries({
+          queryKey: deploymentDetailsQueryKeys.all,
+        })
         onOpenChange(false)
         return
       }

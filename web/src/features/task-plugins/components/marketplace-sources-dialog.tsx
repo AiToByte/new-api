@@ -39,6 +39,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 
 import { listMarketplaceSources, updateMarketplaceSources } from '../api'
 import { isDefaultMarketplaceSource } from '../lib/marketplace'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { MarketplaceSource } from '../types'
 
 type MarketplaceSourcesDialogProps = {
@@ -63,7 +64,7 @@ export function MarketplaceSourcesDialog(props: MarketplaceSourcesDialogProps) {
     return `row-${nextRowId.current}`
   }
   const sourcesQuery = useQuery({
-    queryKey: ['task-plugin-marketplace-sources'],
+    queryKey: taskPluginsQueryKeys.marketplaceSources,
     queryFn: listMarketplaceSources,
     enabled: props.open,
   })
@@ -81,8 +82,10 @@ export function MarketplaceSourcesDialog(props: MarketplaceSourcesDialogProps) {
   const saveMutation = useMutation({
     mutationFn: updateMarketplaceSources,
     onSuccess: (saved) => {
-      queryClient.setQueryData(['task-plugin-marketplace-sources'], saved)
-      queryClient.invalidateQueries({ queryKey: ['task-plugin-marketplace'] })
+      queryClient.setQueryData(taskPluginsQueryKeys.marketplaceSources, saved)
+      queryClient.invalidateQueries({
+        queryKey: taskPluginsQueryKeys.marketplace,
+      })
       toast.success(t('Marketplace sources updated'))
       props.onOpenChange(false)
     },

@@ -63,6 +63,7 @@ import {
   useApiInfo,
   useDashboardContentVisibility,
 } from '../../hooks/use-status-data'
+import { dashboardQueryKeys } from '../../lib/query-keys'
 import { AnnouncementsPanel } from './announcements-panel'
 import { ApiInfoPanel } from './api-info-panel'
 import { FAQPanel } from './faq-panel'
@@ -482,7 +483,7 @@ export function OverviewDashboard() {
   const isAdmin = Boolean(user?.role && user.role >= ROLE.ADMIN)
 
   const apiKeysQuery = useQuery({
-    queryKey: ['dashboard', 'overview', 'api-keys'],
+    queryKey: dashboardQueryKeys.overviewApiKeys,
     queryFn: async () => {
       const result = requireServerSuccess(await getApiKeys({ p: 1, size: 10 }))
       return result.success ? (result.data?.items ?? []) : []
@@ -491,7 +492,7 @@ export function OverviewDashboard() {
   })
 
   const modelsQuery = useQuery({
-    queryKey: ['dashboard', 'overview', 'user-models'],
+    queryKey: dashboardQueryKeys.overviewUserModels,
     queryFn: async () => {
       const result = requireServerSuccess(await getUserModels())
       return result.success ? (result.data ?? []) : []

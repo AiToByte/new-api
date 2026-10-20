@@ -46,6 +46,7 @@ import {
   fetchPluginSourceText,
   PluginSourceFetchError,
 } from '../lib/plugin-url'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { MarketplacePlugin, MarketplaceSource } from '../types'
 import { JavaScriptViewer } from './javascript-viewer'
 import { MarketplaceCapabilities } from './marketplace-capabilities'
@@ -95,14 +96,13 @@ function MarketplaceInstallContent(
   const [reviewTab, setReviewTab] = useState('details')
 
   const sourceQuery = useQuery({
-    queryKey: [
-      'task-plugin-marketplace-source',
+    queryKey: taskPluginsQueryKeys.marketplaceSource(
       target.source.index_url,
       pluginKey,
       selectedVersion,
       entry?.path,
-      entry?.sha256,
-    ],
+      entry?.sha256
+    ),
     enabled: Boolean(entry),
     retry: false,
     meta: { errorToast: false },
@@ -138,7 +138,7 @@ function MarketplaceInstallContent(
 
   // The installed source is the diff baseline for an upgrade.
   const installedQuery = useQuery({
-    queryKey: ['task-plugin', pluginKey],
+    queryKey: taskPluginsQueryKeys.detail(pluginKey),
     queryFn: () => getTaskPlugin(pluginKey),
     enabled: hasInstalledPlugin,
   })
@@ -166,10 +166,12 @@ function MarketplaceInstallContent(
       return detail
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
-      queryClient.invalidateQueries({ queryKey: ['task-plugin', pluginKey] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
       queryClient.invalidateQueries({
-        queryKey: ['task-plugin-versions', pluginKey],
+        queryKey: taskPluginsQueryKeys.detail(pluginKey),
+      })
+      queryClient.invalidateQueries({
+        queryKey: taskPluginsQueryKeys.versionsOf(pluginKey),
       })
     },
     onSuccess: (detail) => {

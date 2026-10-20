@@ -42,10 +42,12 @@ import {
 import { getGroups } from '@/features/users/api'
 import { useMediaQuery } from '@/hooks'
 import { getUserGroups } from '@/lib/api'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
+import { logsQueryKeys } from '../lib/query-keys'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -125,14 +127,14 @@ export function CommonLogsFilterBar<TData>(
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
-  const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const fetchingLogs = useIsFetching({ queryKey: logsQueryKeys.all })
   const { data: adminGroups } = useQuery({
-    queryKey: ['groups'],
+    queryKey: globalQueryKeys.groups,
     queryFn: async () => requireServerSuccess(await getGroups()),
     enabled: isAdmin,
   })
   const { data: userGroups } = useQuery({
-    queryKey: ['user-groups'],
+    queryKey: globalQueryKeys.userGroups,
     queryFn: async () => requireServerSuccess(await getUserGroups()),
     enabled: !isAdmin,
   })
@@ -222,8 +224,8 @@ export function CommonLogsFilterBar<TData>(
           page: 1,
         },
       })
-      queryClient.invalidateQueries({ queryKey: ['logs'] })
-      queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
+      queryClient.invalidateQueries({ queryKey: logsQueryKeys.all })
+      queryClient.invalidateQueries({ queryKey: logsQueryKeys.stats })
     },
     [filters, logType, navigate, queryClient]
   )
@@ -250,8 +252,8 @@ export function CommonLogsFilterBar<TData>(
         ...resetSearch,
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
+    queryClient.invalidateQueries({ queryKey: logsQueryKeys.all })
+    queryClient.invalidateQueries({ queryKey: logsQueryKeys.stats })
   }, [navigate, queryClient])
 
   const handleKeyDown = useCallback(

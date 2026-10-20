@@ -27,6 +27,7 @@ import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { getUserModels } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -103,7 +104,7 @@ export function CCSwitchDialog(props: Props) {
   const [models, setModels] = useState<Record<string, string>>({})
 
   const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
+    queryKey: modelsQueryKeys.userModelsCcswitch,
     queryFn: async () => requireServerSuccess(await getUserModels()),
     enabled: props.open,
     staleTime: 5 * 60 * 1000,

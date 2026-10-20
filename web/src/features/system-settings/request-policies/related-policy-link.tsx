@@ -21,6 +21,7 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { getChannelOps } from '@/features/channels/api'
+import { channelsQueryKeys } from '@/features/channels/lib'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
@@ -47,7 +48,7 @@ export function RelatedPolicyLink(props: { section: 'routing' | 'health' }) {
 export function ChannelHealthSource(props: { autoBan: boolean }) {
   const { t } = useTranslation()
   const query = useQuery({
-    queryKey: ['channel-ops', { autoBan: props.autoBan }],
+    queryKey: channelsQueryKeys.opsFor(props.autoBan),
     queryFn: async () =>
       requireServerSuccess(await getChannelOps(props.autoBan)),
     retry: false,

@@ -37,6 +37,7 @@ import {
   type InstallState,
 } from '../lib/marketplace'
 import { fetchPluginIconDataUri } from '../lib/plugin-icon-file'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { MarketplacePlugin, TaskPluginListItem } from '../types'
 import { PluginIcon } from './plugin-icon'
 import { PluginWebsiteLink } from './plugin-website-link'
@@ -205,11 +206,7 @@ type MarketplacePluginLogoProps = {
  */
 function MarketplacePluginLogo(props: MarketplacePluginLogoProps) {
   const iconQuery = useQuery({
-    queryKey: [
-      'task-plugin-marketplace-icon',
-      props.iconUrl,
-      props.sha256 ?? '',
-    ],
+    queryKey: taskPluginsQueryKeys.marketplaceIcon(props.iconUrl, props.sha256),
     queryFn: () =>
       fetchPluginIconDataUri(props.iconUrl, { sha256: props.sha256 }),
     staleTime: Number.POSITIVE_INFINITY,

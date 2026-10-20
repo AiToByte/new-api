@@ -20,11 +20,12 @@ import { useQuery } from '@tanstack/react-query'
 
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import { systemSettingsQueryKeys } from '../../../lib/query-keys'
 import { getCustomOAuthProviders } from '../api'
 
 export function useCustomOAuthProviders() {
   return useQuery({
-    queryKey: ['custom-oauth-providers'],
+    queryKey: systemSettingsQueryKeys.customOAuthProviders,
     queryFn: async () => {
       const res = requireServerSuccess(await getCustomOAuthProviders())
       return res.data ?? []

@@ -40,6 +40,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { SettingsPageProvider } from '../../components/settings-page-context'
+import { systemSettingsQueryKeys } from '../../lib/query-keys'
 import { RoutingPolicySection } from '../routing-section'
 
 const options = {
@@ -577,7 +578,9 @@ it('refreshing settings preserves unsaved rule and retry edits', async () => {
     'channel_affinity_setting.default_ttl_seconds': '120',
   }
   await act(async () => {
-    await client.invalidateQueries({ queryKey: ['request-policy'] })
+    await client.invalidateQueries({
+      queryKey: systemSettingsQueryKeys.requestPolicy,
+    })
   })
   expect(
     screen.getByRole('spinbutton', {

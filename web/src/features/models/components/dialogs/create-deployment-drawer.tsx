@@ -71,7 +71,7 @@ import {
   getAvailableReplicas,
   getHardwareTypes,
 } from '../../api'
-import { deploymentsQueryKeys } from '../../lib'
+import { deploymentDetailsQueryKeys, deploymentsQueryKeys } from '../../lib'
 
 const BUILTIN_IMAGE = 'ollama/ollama:latest'
 const DEFAULT_TRAFFIC_PORT = 11434
@@ -144,7 +144,7 @@ export function CreateDeploymentDrawer({
   const resourceName = form.watch('resource_private_name')
 
   const { data: hardwareTypesData, isLoading: isLoadingHardware } = useQuery({
-    queryKey: ['deployment-hardware-types'],
+    queryKey: deploymentDetailsQueryKeys.hardwareTypes,
     queryFn: async () => requireServerSuccess(await getHardwareTypes()),
     enabled: open,
   })
@@ -173,7 +173,10 @@ export function CreateDeploymentDrawer({
   }, [hardwareId, hardwareOptions, gpuCount, form])
 
   const { data: replicasData, isLoading: isLoadingReplicas } = useQuery({
-    queryKey: ['deployment-available-replicas', hardwareId, gpuCount],
+    queryKey: deploymentDetailsQueryKeys.availableReplicas(
+      hardwareId,
+      gpuCount
+    ),
     queryFn: async () =>
       requireServerSuccess(
         await getAvailableReplicas({
@@ -205,15 +208,14 @@ export function CreateDeploymentDrawer({
   }, [replicasData])
 
   const { data: priceData, isLoading: _isLoadingPrice } = useQuery({
-    queryKey: [
-      'deployment-price',
+    queryKey: deploymentDetailsQueryKeys.price(
       hardwareId,
       gpuCount,
       durationHours,
       replicaCount,
       locationIds,
-      currency,
-    ],
+      currency
+    ),
     queryFn: async () =>
       requireServerSuccess(
         await estimatePrice({
@@ -235,7 +237,7 @@ export function CreateDeploymentDrawer({
   })
 
   const { data: nameCheckData, isFetching: isCheckingName } = useQuery({
-    queryKey: ['deployment-name-check', resourceName],
+    queryKey: deploymentDetailsQueryKeys.nameCheck(resourceName),
     queryFn: async () => {
       const name = (resourceName || '').trim()
       if (!name) return null

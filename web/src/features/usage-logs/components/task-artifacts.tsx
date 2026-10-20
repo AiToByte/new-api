@@ -65,6 +65,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { getTaskArtifacts } from '../api'
+import { logsQueryKeys } from '../lib/query-keys'
 import {
   resolveTaskPreviewMode,
   shouldLoadTaskArtifacts,
@@ -104,7 +105,7 @@ function LegacyAudioPreview(props: { taskId: string }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const artifactsQuery = useQuery({
-    queryKey: ['usage-logs', 'task-artifacts', props.taskId],
+    queryKey: logsQueryKeys.taskArtifacts(props.taskId),
     queryFn: async () =>
       requireServerSuccess(await getTaskArtifacts(props.taskId)),
     enabled: open,
@@ -305,7 +306,7 @@ interface TaskArtifactsProps {
 function TaskArtifacts(props: TaskArtifactsProps) {
   const { t } = useTranslation()
   const artifactsQuery = useQuery({
-    queryKey: ['usage-logs', 'task-artifacts', props.taskId],
+    queryKey: logsQueryKeys.taskArtifacts(props.taskId),
     queryFn: async () =>
       requireServerSuccess(await getTaskArtifacts(props.taskId)),
     enabled: props.enabled,

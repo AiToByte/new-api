@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { channelsQueryKeys } from '@/features/channels/lib'
 import {
   useCanEditModelPricing,
   invalidateModelPricing,
@@ -76,7 +77,7 @@ export function ModelDeleteDialog(props: ModelDeleteDialogProps) {
       await invalidateVendorData(client)
       if (removePricing) await invalidateModelPricing(client)
       if (removeFromChannels) {
-        await client.invalidateQueries({ queryKey: ['channels'] })
+        await client.invalidateQueries({ queryKey: channelsQueryKeys.all })
       }
       toast.success(
         t('Successfully deleted {{count}} model(s)', {

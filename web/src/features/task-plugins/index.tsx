@@ -44,6 +44,7 @@ import { MarketplacePanel } from './components/marketplace-panel'
 import { PluginDetailSheet } from './components/plugin-detail-sheet'
 import { PluginsTable } from './components/plugins-table'
 import { UploadDialog } from './components/upload-dialog'
+import { taskPluginsQueryKeys } from './lib/query-keys'
 import type { TaskPluginListItem } from './types'
 
 export function TaskPlugins() {
@@ -55,11 +56,11 @@ export function TaskPlugins() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [confirmDisable, setConfirmDisable] = useState(false)
   const enabledQuery = useQuery({
-    queryKey: ['task-plugin-enabled'],
+    queryKey: taskPluginsQueryKeys.enabled,
     queryFn: getTaskPluginEnabledOption,
   })
   const pluginsQuery = useQuery({
-    queryKey: ['task-plugins'],
+    queryKey: taskPluginsQueryKeys.all,
     queryFn: listTaskPlugins,
   })
   const enabledMutation = useMutation({

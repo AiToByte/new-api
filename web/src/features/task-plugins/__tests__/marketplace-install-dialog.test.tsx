@@ -31,6 +31,7 @@ import {
   MarketplaceInstallDialog,
   type MarketplaceInstallTarget,
 } from '../components/marketplace-install-dialog'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 
 const api = vi.hoisted(() => ({
   getTaskPlugin: vi.fn(),
@@ -693,9 +694,9 @@ test('a factory plugin uses its built-in source as the diff baseline and install
   const updated = [
     { meta: { key: 'demo', version: '1.0' }, source: 'override_over_factory' },
   ]
-  client.setQueryData(['task-plugins'], installed)
+  client.setQueryData(taskPluginsQueryKeys.all, installed)
   const observer = new QueryObserver(client, {
-    queryKey: ['task-plugins'],
+    queryKey: taskPluginsQueryKeys.all,
     queryFn: async () => updated,
     staleTime: Infinity,
   })

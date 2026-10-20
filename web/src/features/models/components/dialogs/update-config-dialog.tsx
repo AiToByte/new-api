@@ -46,7 +46,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getDeployment, updateDeployment } from '../../api'
-import { deploymentsQueryKeys } from '../../lib'
+import { deploymentDetailsQueryKeys, deploymentsQueryKeys } from '../../lib'
 
 const schema = z.object({
   image_url: z.string().optional(),
@@ -106,7 +106,7 @@ export function UpdateConfigDialog({
   })
 
   const { data: detailsRes, isLoading } = useQuery({
-    queryKey: ['deployment-details-for-update', deploymentId],
+    queryKey: deploymentDetailsQueryKeys.forUpdate(deploymentId),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId ? getDeployment(deploymentId) : null)
@@ -203,7 +203,9 @@ export function UpdateConfigDialog({
         queryClient.invalidateQueries({
           queryKey: deploymentsQueryKeys.lists(),
         })
-        queryClient.invalidateQueries({ queryKey: ['deployment-details'] })
+        queryClient.invalidateQueries({
+          queryKey: deploymentDetailsQueryKeys.all,
+        })
         onOpenChange(false)
         return
       }

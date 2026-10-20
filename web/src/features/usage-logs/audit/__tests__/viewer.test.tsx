@@ -43,6 +43,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { AuditLogs } from '..'
 import { AuditLogViewer } from '../components/audit-log-viewer'
+import { auditQueryKeys } from '../lib/query-keys'
 
 it.each([
   [
@@ -733,7 +734,7 @@ it('clears global records and open details on revocation, falls back to self, an
     await screen.findByRole('dialog', { name: 'Log Details' })
   ).toBeVisible()
   revoked = true
-  await client.invalidateQueries({ queryKey: ['audit', 1, 'all'] })
+  await client.invalidateQueries({ queryKey: auditQueryKeys.allFor(1) })
   await waitFor(() =>
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   )
@@ -743,9 +744,9 @@ it('clears global records and open details on revocation, falls back to self, an
   await waitFor(() => expect(get).toHaveBeenCalledWith('/api/user/self'))
   expect(screen.queryByText('other-account')).not.toBeInTheDocument()
   expect(screen.queryByRole('tab', { name: 'All' })).not.toBeInTheDocument()
-  expect(client.getQueriesData({ queryKey: ['audit', 1, 'all'] })).toHaveLength(
-    0
-  )
+  expect(
+    client.getQueriesData({ queryKey: auditQueryKeys.allFor(1) })
+  ).toHaveLength(0)
   expect(client.getQueryData(['audit', 99, 'all'])).toEqual({
     items: ['separate-session'],
   })

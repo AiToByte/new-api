@@ -29,6 +29,7 @@ import {
   textAvatarClass,
   type PluginIconInput,
 } from '../lib/plugin-icon'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 
 type PluginIconProps = {
   plugin: PluginIconInput
@@ -37,7 +38,7 @@ type PluginIconProps = {
 
 function GatewayPluginIcon(props: PluginIconProps) {
   const query = useQuery({
-    queryKey: ['task-plugin', props.plugin.key, 'icon'],
+    queryKey: taskPluginsQueryKeys.detailIcon(props.plugin.key),
     queryFn: async ({ signal }) => {
       // An img request cannot carry the dashboard Bearer token. Fetch through
       // the shared client, then keep SVG in the browser's inert image mode.

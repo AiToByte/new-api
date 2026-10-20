@@ -47,6 +47,7 @@ import {
   CHANNEL_TYPE_SGLANG,
   CHANNEL_TYPE_VLLM,
 } from '../../constants'
+import { channelsQueryKeys } from '../../lib'
 import { channelSchema, type Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelsProvider } from '../channels-provider'
@@ -2152,7 +2153,7 @@ test('a failed update retains the draft through a background detail refetch', as
     expect(screen.getByRole('button', { name: 'Update Channel' })).toBeEnabled()
   )
   await act(async () => {
-    await client.refetchQueries({ queryKey: ['channels'] })
+    await client.refetchQueries({ queryKey: channelsQueryKeys.all })
   })
   expect(screen.getByDisplayValue('Unsaved name')).toBeVisible()
 })
@@ -2212,7 +2213,7 @@ test('a background refresh updates untouched values without moving the selected 
   await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
   editingChannel = { ...editingChannel, priority: 5 }
   await act(async () => {
-    await client.refetchQueries({ queryKey: ['channels'] })
+    await client.refetchQueries({ queryKey: channelsQueryKeys.all })
   })
   expect(
     screen.getByRole('tab', { name: /Routing & Mapping/ })

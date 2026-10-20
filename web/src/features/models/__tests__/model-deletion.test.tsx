@@ -22,6 +22,8 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { channelsQueryKeys } from '@/features/channels/lib'
+import { modelPricingQueryKeys } from '@/features/model-pricing/lib/query-keys'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -93,7 +95,9 @@ describe('model deletion', () => {
     expect(remove).toHaveBeenCalledWith('/api/models/7', {
       params: { remove_from_channels: false, remove_pricing: false },
     })
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['channels'] })
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: channelsQueryKeys.all,
+    })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   })
 
@@ -129,7 +133,7 @@ describe('model deletion', () => {
       remove_from_channels: true,
       remove_pricing: false,
     })
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['channels'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: channelsQueryKeys.all })
   })
 
   it('disables dismissal and repeated submission while a single removal is pending', async () => {
@@ -189,9 +193,11 @@ it('lets a super administrator remove pricing independently of channel removal',
     remove_pricing: true,
   })
   expect(invalidate).toHaveBeenCalledWith({
-    queryKey: ['model-pricing-config'],
+    queryKey: modelPricingQueryKeys.config,
   })
-  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['channels'] })
+  expect(invalidate).not.toHaveBeenCalledWith({
+    queryKey: channelsQueryKeys.all,
+  })
 })
 
 it('keeps pricing removal unavailable to an ordinary administrator', () => {

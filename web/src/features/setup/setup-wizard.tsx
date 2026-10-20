@@ -39,6 +39,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { handleServerError } from '@/lib/handle-server-error'
 import { accountPasswordSchema } from '@/lib/password-policy'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -98,7 +99,7 @@ export function SetupWizard() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['setup-status'],
+    queryKey: globalQueryKeys.setupStatus,
     queryFn: async () => requireServerSuccess(await getSetupStatus()),
     retry: false,
   })
@@ -109,7 +110,9 @@ export function SetupWizard() {
     onSuccess: async (response) => {
       if (response.success) {
         toast.success(t('System initialized successfully! Redirecting…'))
-        await queryClient.invalidateQueries({ queryKey: ['setup-status'] })
+        await queryClient.invalidateQueries({
+          queryKey: globalQueryKeys.setupStatus,
+        })
         setTimeout(() => {
           navigate({ to: '/' })
         }, 1200)

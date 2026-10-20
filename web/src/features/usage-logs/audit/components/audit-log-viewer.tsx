@@ -28,6 +28,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getAuditLogs, type AuditFilters, type AuditLog } from '../api'
+import { auditQueryKeys } from '../lib/query-keys'
 import { useAuditLogColumns } from './audit-log-columns'
 import { AuditLogFilterBar } from './audit-log-filter-bar'
 
@@ -61,7 +62,7 @@ export function AuditLogViewer(props: {
     filters.end_timestamp !== undefined &&
     filters.start_timestamp > filters.end_timestamp
   const query = useQuery({
-    queryKey: ['audit', userId, props.scope, params],
+    queryKey: auditQueryKeys.detail(userId, props.scope, params),
     queryFn: async () =>
       requireServerSuccess(await getAuditLogs(props.scope, params)),
     enabled: canQuery && !invalidRange,

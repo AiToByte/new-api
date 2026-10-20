@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import { getEnabledModels } from '@/features/channels/api'
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -183,7 +184,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   const visualEditorRef = useRef<ModelRatioVisualEditorHandle>(null)
 
   const enabledModelsQuery = useQuery({
-    queryKey: ['enabled-models'],
+    queryKey: modelsQueryKeys.enabledModels,
     queryFn: async () => requireServerSuccess(await getEnabledModels()),
     enabled: isUnsetVariant,
   })

@@ -45,6 +45,7 @@ import {
   MAX_PLUGIN_SOURCE_BYTES,
   pluginSourceByteLength,
 } from '../lib/plugin-url'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { TaskPluginDetail } from '../types'
 import { MarketplaceCapabilities } from './marketplace-capabilities'
 import { PluginIcon } from './plugin-icon'
@@ -76,12 +77,12 @@ export function UploadDialog(props: UploadDialogProps) {
     mutationFn: () => uploadTaskPlugin(source, remark, icon),
     onSuccess: (data) => {
       setResult(data)
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
       queryClient.invalidateQueries({
-        queryKey: ['task-plugin', data.meta.key],
+        queryKey: taskPluginsQueryKeys.detail(data.meta.key),
       })
       queryClient.invalidateQueries({
-        queryKey: ['task-plugin-versions', data.meta.key],
+        queryKey: taskPluginsQueryKeys.versionsOf(data.meta.key),
       })
       toast.success(
         data.plugin?.active === false
@@ -94,12 +95,12 @@ export function UploadDialog(props: UploadDialogProps) {
     mutationFn: (detail: TaskPluginDetail) =>
       activateTaskPlugin(detail.meta.key, detail.meta.version),
     onSuccess: (_, detail) => {
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
       queryClient.invalidateQueries({
-        queryKey: ['task-plugin', detail.meta.key],
+        queryKey: taskPluginsQueryKeys.detail(detail.meta.key),
       })
       queryClient.invalidateQueries({
-        queryKey: ['task-plugin-versions', detail.meta.key],
+        queryKey: taskPluginsQueryKeys.versionsOf(detail.meta.key),
       })
       toast.success(t('Plugin version activated'))
     },

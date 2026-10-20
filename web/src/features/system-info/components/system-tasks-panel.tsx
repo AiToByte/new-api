@@ -28,6 +28,7 @@ import { listSystemTasks } from '@/features/system-settings/api'
 import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
+import { systemInfoQueryKeys } from '../lib/query-keys'
 import { SystemTaskHistory } from './system-task-history'
 import { SystemTasksTable } from './system-tasks-table'
 
@@ -36,7 +37,7 @@ const ACTIVE_POLL_INTERVAL_MS = 8000
 export function SystemTasksPanel() {
   const { t } = useTranslation()
   const tasksQuery = useQuery({
-    queryKey: ['system-info', 'system-tasks', 'active'],
+    queryKey: systemInfoQueryKeys.systemTasksActive,
     queryFn: async () => {
       const res = await listSystemTasks(100, { scope: 'active' })
       if (!res.success || !Array.isArray(res.data)) {

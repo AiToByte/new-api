@@ -56,6 +56,12 @@ export const channelsQueryKeys = {
     [...channelsQueryKeys.lists(), params] as const,
   details: () => [...channelsQueryKeys.all, 'detail'] as const,
   detail: (id: number) => [...channelsQueryKeys.details(), id] as const,
+  /** 渠道推理状态（按渠道与提供方） */
+  inferenceStatus: (channelId: string | number, provider: string) =>
+    ['channels', channelId, provider, 'inference-status'] as const,
+  /** 渠道运维看板；`opsFor` 按自动封禁开关区分 */
+  ops: ['channel-ops'] as const,
+  opsFor: (autoBan: boolean) => ['channel-ops', { autoBan }] as const,
 }
 
 function getChannelTestResponseTime(

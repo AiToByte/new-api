@@ -20,9 +20,11 @@ import type { QueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { t } from 'i18next'
 
+import { pricingQueryKeys } from '@/features/pricing/lib/query-keys'
 import { api } from '@/lib/api'
 import { createServerError } from '@/lib/server-error-message'
 
+import { modelsQueryKeys, vendorsQueryKeys } from './lib/query-keys'
 import type { Model, Vendor } from './types'
 
 export type VendorOperation = {
@@ -96,8 +98,8 @@ export function vendorErrorMessage(error: unknown): string {
 
 export async function invalidateVendorData(client: QueryClient) {
   await Promise.all(
-    ['vendors', 'models', 'pricing'].map((key) =>
-      client.invalidateQueries({ queryKey: [key] })
+    [vendorsQueryKeys.all, modelsQueryKeys.all, pricingQueryKeys.all].map(
+      (queryKey) => client.invalidateQueries({ queryKey })
     )
   )
 }

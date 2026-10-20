@@ -105,7 +105,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SecureVerificationDialog } from '@/features/auth/secure-verification'
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
+import { taskPluginsQueryKeys } from '@/features/task-plugins/lib/query-keys'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -118,6 +120,7 @@ import {
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { ROLE } from '@/lib/roles'
 import {
   requireServerSuccess,
@@ -540,21 +543,21 @@ export function ChannelMutateDrawer({
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
-    queryKey: ['groups'],
+    queryKey: globalQueryKeys.groups,
     queryFn: async () => requireServerSuccess(await getGroups()),
     enabled: open && !showProviderPicker,
   })
 
   // Fetch all available models
   const { data: allModelsData } = useQuery({
-    queryKey: ['channel_models'],
+    queryKey: modelsQueryKeys.channelModels,
     queryFn: async () => requireServerSuccess(await getAllModels()),
     enabled: open && !showProviderPicker,
   })
 
   // Fetch prefill model groups
   const { data: prefillGroupsData } = useQuery({
-    queryKey: ['prefill_groups', 'model'],
+    queryKey: modelsQueryKeys.modelPrefillGroups,
     queryFn: async () => requireServerSuccess(await getPrefillGroups('model')),
     enabled: open && !showProviderPicker,
   })
@@ -762,7 +765,7 @@ export function ChannelMutateDrawer({
     [currentType]
   )
   const taskPluginOptionsQuery = useQuery({
-    queryKey: ['task-plugin-options'],
+    queryKey: taskPluginsQueryKeys.options,
     queryFn: async () => requireServerSuccess(await getTaskPluginOptions()),
     enabled: open && canBindTaskPlugin,
     meta: { errorToast: false },

@@ -37,6 +37,7 @@ import { Switch } from '@/components/ui/switch'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getDeploymentLogs, listDeploymentContainers } from '../../api'
+import { deploymentDetailsQueryKeys } from '../../lib'
 
 interface ViewLogsDialogProps {
   open: boolean
@@ -62,7 +63,7 @@ export function ViewLogsDialog({
     refetch: refetchContainers,
     isFetching: isFetchingContainers,
   } = useQuery({
-    queryKey: ['deployment-containers', deploymentId],
+    queryKey: deploymentDetailsQueryKeys.containers(deploymentId),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId ? listDeploymentContainers(deploymentId) : null)
@@ -102,7 +103,11 @@ export function ViewLogsDialog({
     refetch: refetchLogs,
     isFetching: isFetchingLogs,
   } = useQuery({
-    queryKey: ['deployment-logs', deploymentId, containerId, stream],
+    queryKey: deploymentDetailsQueryKeys.logs(
+      deploymentId,
+      containerId,
+      stream
+    ),
     queryFn: async () =>
       requireServerSuccess(
         await (deploymentId && containerId

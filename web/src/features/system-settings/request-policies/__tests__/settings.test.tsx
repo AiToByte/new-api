@@ -36,6 +36,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { Route as ModelsRoute } from '@/routes/_authenticated/system-settings/models/$section'
 import { Route as OperationsRoute } from '@/routes/_authenticated/system-settings/operations/$section'
 import { Route as PoliciesRoute } from '@/routes/_authenticated/system-settings/request-policies/$section'
@@ -261,7 +262,9 @@ describe('request policy settings', () => {
     fireEvent.change(keywords, { target: { value: 'unsaved' } })
     settings.RetryTimes = 5
     await act(async () => {
-      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      await queryClient.invalidateQueries({
+        queryKey: globalQueryKeys.systemOptions,
+      })
     })
     expect(keywords).toHaveValue('unsaved')
   })

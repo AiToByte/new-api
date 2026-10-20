@@ -42,10 +42,10 @@ import { createServerError } from '@/lib/server-error-message'
 
 import { deleteSystemTaskHistory } from '../api'
 import { SYSTEM_TASK_TYPE_LABEL } from '../constants'
+import { systemInfoQueryKeys } from '../lib/query-keys'
 import { SystemTasksTable } from './system-tasks-table'
 
 const EMPTY_TASKS: SystemTask[] = []
-const HISTORY_QUERY_KEY = ['system-info', 'system-tasks', 'history']
 
 export function SystemTaskHistory(props: { activeRefreshAt: number }) {
   const { t } = useTranslation()
@@ -56,7 +56,7 @@ export function SystemTaskHistory(props: { activeRefreshAt: number }) {
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
   const [cleanupOpen, setCleanupOpen] = useState(false)
   const historyQuery = useQuery({
-    queryKey: [...HISTORY_QUERY_KEY, filters, pagination],
+    queryKey: systemInfoQueryKeys.taskHistoryList(filters, pagination),
     queryFn: async () => {
       const res = await listSystemTasks(pagination.pageSize, {
         ...filters,
@@ -75,7 +75,9 @@ export function SystemTaskHistory(props: { activeRefreshAt: number }) {
   // when finishing the last task stops active-task polling.
   useEffect(() => {
     if (props.activeRefreshAt) {
-      void queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY })
+      void queryClient.invalidateQueries({
+        queryKey: systemInfoQueryKeys.taskHistory,
+      })
     }
   }, [props.activeRefreshAt, queryClient])
 
@@ -113,7 +115,9 @@ export function SystemTaskHistory(props: { activeRefreshAt: number }) {
       toast.success(t('Deleted {{count}} historical system tasks', { count }))
       setCleanupOpen(false)
       setPagination((previous) => ({ ...previous, pageIndex: 0 }))
-      await queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY })
+      await queryClient.invalidateQueries({
+        queryKey: systemInfoQueryKeys.taskHistory,
+      })
     },
     onError: (error) => handleServerError(error, t('Cleanup failed')),
   })

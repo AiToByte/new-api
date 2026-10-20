@@ -35,6 +35,7 @@ import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { dashboardQueryKeys } from '../../lib/query-keys'
 import { StatCard } from '../ui/stat-card'
 
 const SUMMARY_SPARKLINE_BUCKETS = 12
@@ -148,13 +149,10 @@ export function SummaryCards() {
   const requestCount = Number(user?.request_count ?? 0)
 
   const usageTrendQuery = useQuery({
-    queryKey: [
-      'dashboard',
-      'overview',
-      'summary-sparklines',
+    queryKey: dashboardQueryKeys.summarySparklines(
       summaryTimeRange.start_timestamp,
-      summaryTimeRange.end_timestamp,
-    ],
+      summaryTimeRange.end_timestamp
+    ),
     queryFn: async () =>
       requireServerSuccess(
         await getUserQuotaDates({

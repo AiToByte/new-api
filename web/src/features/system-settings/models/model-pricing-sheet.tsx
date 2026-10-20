@@ -71,6 +71,7 @@ import {
   isValidPricingCurrency,
   USD_PRICING_CURRENCY,
 } from '@/features/model-pricing/currency'
+import { modelPricingQueryKeys } from '@/features/model-pricing/lib/query-keys'
 import { pricingFromDraft, pricingRow } from '@/features/model-pricing/pricing'
 import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import {
@@ -293,7 +294,7 @@ export const ModelPricingEditorPanel = forwardRef<
   }
   const debouncedPreviewRequest = useDebounce(previewRequest, 250)
   const pricePreview = useQuery({
-    queryKey: ['model-pricing-preview', debouncedPreviewRequest],
+    queryKey: modelPricingQueryKeys.previewFor(debouncedPreviewRequest),
     queryFn: () => previewModelPricing(JSON.parse(debouncedPreviewRequest)),
     enabled:
       Boolean(debouncedPreviewRequest) &&

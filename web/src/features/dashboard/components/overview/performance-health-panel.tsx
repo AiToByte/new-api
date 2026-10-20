@@ -31,6 +31,7 @@ import {
   getSuccessRateDotClass,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -40,7 +41,7 @@ const TOP_MODEL_LIMIT = 6
 export function PerformanceHealthPanel() {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
+    queryKey: globalQueryKeys.perfMetricsSummary(PERFORMANCE_WINDOW_HOURS),
     queryFn: async () =>
       requireServerSuccess(
         await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS)

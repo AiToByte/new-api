@@ -21,7 +21,9 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 
+import { systemSettingsQueryKeys } from '../../../lib/query-keys'
 import {
   createCustomOAuthProvider,
   updateCustomOAuthProvider,
@@ -34,8 +36,10 @@ function useInvalidateOnSuccess() {
   const queryClient = useQueryClient()
   return {
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['custom-oauth-providers'] })
-      queryClient.invalidateQueries({ queryKey: ['status'] })
+      queryClient.invalidateQueries({
+        queryKey: systemSettingsQueryKeys.customOAuthProviders,
+      })
+      queryClient.invalidateQueries({ queryKey: globalQueryKeys.status })
     },
   }
 }

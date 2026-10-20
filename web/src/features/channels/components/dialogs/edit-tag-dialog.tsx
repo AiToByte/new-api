@@ -32,7 +32,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
@@ -65,7 +67,7 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
   // Fetch tag models
   const { data: tagModelsData, isLoading: isLoadingTagModels } = useQuery({
-    queryKey: ['tag-models', currentTag],
+    queryKey: modelsQueryKeys.tagModels(currentTag),
     queryFn: async () =>
       requireServerSuccess(
         await (currentTag ? getTagModels(currentTag) : null)
@@ -75,14 +77,14 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
   // Fetch all available models
   const { data: allModelsData } = useQuery({
-    queryKey: ['all-models'],
+    queryKey: modelsQueryKeys.allModels,
     queryFn: async () => requireServerSuccess(await getAllModels()),
     enabled: open,
   })
 
   // Fetch groups
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
+    queryKey: globalQueryKeys.groups,
     queryFn: async () => requireServerSuccess(await getGroups()),
     enabled: open,
   })

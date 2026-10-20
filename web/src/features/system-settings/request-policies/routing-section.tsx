@@ -49,6 +49,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { ChannelAffinitySection } from '../general/channel-affinity'
+import { systemSettingsQueryKeys } from '../lib/query-keys'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { getPolicyConfig, type PolicyConfig } from './api'
 import { policyLabel } from './policy-label'
@@ -64,7 +65,7 @@ import { useSavePolicy } from './use-save-policy'
 export function RoutingPolicySection() {
   const { t } = useTranslation()
   const query = useQuery({
-    queryKey: ['request-policy'],
+    queryKey: systemSettingsQueryKeys.requestPolicy,
     queryFn: getPolicyConfig,
     staleTime: Infinity,
   })

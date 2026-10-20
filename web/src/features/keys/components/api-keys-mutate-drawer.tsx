@@ -62,11 +62,13 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { modelsQueryKeys } from '@/features/models/lib/query-keys'
 import { RelatedPolicyLink } from '@/features/system-settings/request-policies/related-policy-link'
 import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 import {
   requireServerSuccess,
   translateServerText,
@@ -120,7 +122,7 @@ export function ApiKeysMutateDrawer({
 
   // Fetch models
   const { data: modelsData } = useQuery({
-    queryKey: ['user-models'],
+    queryKey: modelsQueryKeys.userModels,
     queryFn: async () => requireServerSuccess(await getUserModels()),
     enabled: open,
     staleTime: 0,
@@ -132,7 +134,7 @@ export function ApiKeysMutateDrawer({
     isFetched: groupsFetched,
     isFetching: groupsFetching,
   } = useQuery({
-    queryKey: ['user-groups'],
+    queryKey: globalQueryKeys.userGroups,
     queryFn: async () => requireServerSuccess(await getUserGroups()),
     enabled: open,
     staleTime: 0,

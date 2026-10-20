@@ -39,6 +39,7 @@ import {
   type AccessTokenInput,
   type AccessTokenUpdate,
 } from '../api'
+import { accessTokensQueryKeys } from '../lib/query-keys'
 
 export function useAccessTokens() {
   const { t } = useTranslation()
@@ -56,12 +57,12 @@ export function useAccessTokens() {
   const requestVerification = verification.requestVerification
   const cancelVerification = verification.cancel
   const list = useQuery({
-    queryKey: ['security', 'access-tokens', 'list', userId],
+    queryKey: accessTokensQueryKeys.list(userId),
     queryFn: listAccessTokens,
     retry: false,
   })
   const catalog = useQuery({
-    queryKey: ['security', 'access-tokens', 'catalog', userId],
+    queryKey: accessTokensQueryKeys.catalog(userId),
     queryFn: getAccessTokenCatalog,
     retry: false,
   })
@@ -80,7 +81,7 @@ export function useAccessTokens() {
   const invalidateList = useCallback(
     () =>
       client.invalidateQueries({
-        queryKey: ['security', 'access-tokens', 'list', userId],
+        queryKey: accessTokensQueryKeys.list(userId),
       }),
     [client, userId]
   )

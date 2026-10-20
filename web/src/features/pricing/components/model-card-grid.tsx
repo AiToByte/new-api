@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
@@ -56,7 +57,7 @@ export const ModelCardGrid = memo(function ModelCardGrid(
   }, [currentPage, pageSize, props.models])
   const recentModels = pagedModels.map((model) => model.model_name || '')
   const perfQuery = useQuery({
-    queryKey: ['perf-metrics-summary', 24, recentModels],
+    queryKey: globalQueryKeys.perfMetricsSummaryForModels(24, recentModels),
     queryFn: async () =>
       requireServerSuccess(await getPerfMetricsSummary(24, recentModels)),
     enabled: recentModels.length > 0,

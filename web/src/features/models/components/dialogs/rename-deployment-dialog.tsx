@@ -29,7 +29,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { checkClusterNameAvailability, updateDeploymentName } from '../../api'
-import { deploymentsQueryKeys } from '../../lib'
+import { deploymentDetailsQueryKeys, deploymentsQueryKeys } from '../../lib'
 
 export function RenameDeploymentDialog({
   open,
@@ -54,7 +54,7 @@ export function RenameDeploymentDialog({
   const trimmed = name.trim()
 
   const { data: checkRes, isFetching: isChecking } = useQuery({
-    queryKey: ['deployment-rename-check', trimmed],
+    queryKey: deploymentDetailsQueryKeys.renameCheck(trimmed),
     queryFn: async () =>
       requireServerSuccess(
         await (trimmed ? checkClusterNameAvailability(trimmed) : null)
@@ -99,7 +99,9 @@ export function RenameDeploymentDialog({
         queryClient.invalidateQueries({
           queryKey: deploymentsQueryKeys.lists(),
         })
-        queryClient.invalidateQueries({ queryKey: ['deployment-details'] })
+        queryClient.invalidateQueries({
+          queryKey: deploymentDetailsQueryKeys.all,
+        })
         onOpenChange(false)
         return
       }

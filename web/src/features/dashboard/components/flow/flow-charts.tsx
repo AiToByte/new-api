@@ -93,6 +93,7 @@ import { cn } from '@/lib/utils'
 import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { dashboardQueryKeys } from '../../lib/query-keys'
 import { FlowNodeFilterControl } from './flow-node-filter'
 
 interface FlowChartsProps {
@@ -336,7 +337,7 @@ export function FlowCharts(props: FlowChartsProps) {
     isError,
     isLoading,
   } = useQuery({
-    queryKey: ['dashboard', 'flow', flowQueryParams, flowRole],
+    queryKey: dashboardQueryKeys.flow(flowQueryParams, flowRole),
     queryFn: async () =>
       requireServerSuccess(await getFlowQuotaDates(flowQueryParams, isAdmin)),
     select: (res) =>

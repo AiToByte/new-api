@@ -28,6 +28,20 @@ export const modelsQueryKeys = {
     [...modelsQueryKeys.lists(), filters] as const,
   detail: (id: number) => [...modelsQueryKeys.all, 'detail', id] as const,
   missing: () => [...modelsQueryKeys.all, 'missing'] as const,
+  /** 渠道标签编辑器用的全量模型列表 */
+  allModels: ['all-models'] as const,
+  /** 用户可见模型列表（API 密钥抽屉） */
+  userModels: ['user-models'] as const,
+  /** 用户可见模型列表（Claude Code 切换弹窗） */
+  userModelsCcswitch: ['user-models-ccswitch'] as const,
+  /** 按标签过滤的模型列表 */
+  tagModels: (currentTag: string | null) => ['tag-models', currentTag] as const,
+  /** 渠道已配置模型列表 */
+  channelModels: ['channel_models'] as const,
+  /** 启用态模型列表（倍率表单下拉） */
+  enabledModels: ['enabled-models'] as const,
+  /** 渠道抽屉里的模型预填分组（历史 snake_case 键，保持原样） */
+  modelPrefillGroups: ['prefill_groups', 'model'] as const,
 }
 
 /**
@@ -64,4 +78,59 @@ export const deploymentsQueryKeys = {
   }) => [...deploymentsQueryKeys.lists(), filters] as const,
   detail: (id: string | number) =>
     [...deploymentsQueryKeys.all, 'detail', id] as const,
+}
+
+/**
+ * React Query cache keys for the ionet deployment detail dialogs.
+ *
+ * 与 `deploymentsQueryKeys`（部署管理列表页）是两套键：
+ * 这里的 `all` 是各详情弹窗共用的失效前缀——重命名 / 改配置 /
+ * 续费成功后 invalidate 它，连带刷新所有打开中的详情查询。
+ */
+export const deploymentDetailsQueryKeys = {
+  all: ['deployment-details'] as const,
+  detail: (deploymentId: string | number | null) =>
+    ['deployment-details', deploymentId] as const,
+  forUpdate: (deploymentId: string | number | null) =>
+    ['deployment-details-for-update', deploymentId] as const,
+  forExtend: (deploymentId: string | number | null) =>
+    ['deployment-details-for-extend', deploymentId] as const,
+  containers: (deploymentId: string | number | null) =>
+    ['deployment-containers', deploymentId] as const,
+  detailsContainers: (deploymentId: string | number | null) =>
+    ['deployment-details-containers', deploymentId] as const,
+  logs: (
+    deploymentId: string | number | null,
+    containerId: string,
+    stream: string
+  ) => ['deployment-logs', deploymentId, containerId, stream] as const,
+  hardwareTypes: ['deployment-hardware-types'] as const,
+  availableReplicas: (hardwareId: string, gpuCount: number) =>
+    ['deployment-available-replicas', hardwareId, gpuCount] as const,
+  price: (
+    hardwareId: string | undefined,
+    gpuCount: number,
+    durationHours: number,
+    replicaCount: number,
+    locationIds: unknown,
+    currency: string | undefined
+  ) =>
+    [
+      'deployment-price',
+      hardwareId,
+      gpuCount,
+      durationHours,
+      replicaCount,
+      locationIds,
+      currency,
+    ] as const,
+  extendPrice: (
+    deploymentId: string | number | null,
+    hours: number,
+    priceParams: unknown
+  ) => ['deployment-extend-price', deploymentId, hours, priceParams] as const,
+  nameCheck: (resourceName: string) =>
+    ['deployment-name-check', resourceName] as const,
+  renameCheck: (trimmed: string) =>
+    ['deployment-rename-check', trimmed] as const,
 }

@@ -32,6 +32,7 @@ import {
 } from '../../components/dialogs/log-detail-layout'
 import type { AuditLog } from '../api'
 import { auditFieldLabel, buildAuditDetails } from '../lib/audit-details'
+import { auditQueryKeys } from '../lib/query-keys'
 import { AuditDetailFields } from './audit-detail-fields'
 import { AuditDetailValue } from './audit-detail-value'
 
@@ -39,7 +40,7 @@ export function AuditLogDetailsDialog(props: { entry: AuditLog }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const scopes = useQuery({
-    queryKey: ['access-token-scopes'],
+    queryKey: auditQueryKeys.accessTokenScopes,
     queryFn: getAccessTokenScopes,
     enabled:
       open &&

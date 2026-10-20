@@ -21,6 +21,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { updatePasskeyDomains, updateSystemOption } from '../api'
@@ -56,11 +57,13 @@ export function useUpdateOption() {
     onSuccess: (data, variables) => {
       if (data.success) {
         // Always refresh system-options
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
+        queryClient.invalidateQueries({
+          queryKey: globalQueryKeys.systemOptions,
+        })
 
         // If updating frontend-display-related config, also refresh status
         if (STATUS_RELATED_KEYS.has(variables.key)) {
-          queryClient.invalidateQueries({ queryKey: ['status'] })
+          queryClient.invalidateQueries({ queryKey: globalQueryKeys.status })
           try {
             window.localStorage.removeItem('status')
           } catch {
@@ -94,8 +97,8 @@ export function useUpdatePasskeyDomains() {
     },
     onSuccess: (result, request) => {
       if (request.preview || !result.success) return
-      queryClient.invalidateQueries({ queryKey: ['system-options'] })
-      queryClient.invalidateQueries({ queryKey: ['status'] })
+      queryClient.invalidateQueries({ queryKey: globalQueryKeys.systemOptions })
+      queryClient.invalidateQueries({ queryKey: globalQueryKeys.status })
       try {
         window.localStorage.removeItem('status')
       } catch {

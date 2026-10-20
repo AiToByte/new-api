@@ -30,6 +30,7 @@ import {
 } from '@/components/data-table'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { globalQueryKeys } from '@/lib/query-keys'
 import {
   createServerError,
   requireServerSuccess,
@@ -102,7 +103,7 @@ export function UsersTable() {
       | undefined) ?? []
 
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
+    queryKey: globalQueryKeys.groups,
     queryFn: async () => requireServerSuccess(await getGroups()),
     staleTime: 5 * 60 * 1000,
   })

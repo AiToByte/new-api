@@ -32,6 +32,7 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { AuditLogViewer } from './components/audit-log-viewer'
+import { auditQueryKeys } from './lib/query-keys'
 
 export function AuditLogs() {
   const { t } = useTranslation()
@@ -65,8 +66,10 @@ export function AuditLogs() {
         },
       })
     }
-    await queryClient.cancelQueries({ queryKey: ['audit', userId, 'all'] })
-    queryClient.removeQueries({ queryKey: ['audit', userId, 'all'] })
+    await queryClient.cancelQueries({
+      queryKey: auditQueryKeys.allFor(userId),
+    })
+    queryClient.removeQueries({ queryKey: auditQueryKeys.allFor(userId) })
     try {
       const profile = await getUserProfile()
       const latest = useAuthStore.getState().auth.user

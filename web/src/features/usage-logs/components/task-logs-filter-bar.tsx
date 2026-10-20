@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { buildSearchParams } from '../lib/filter'
+import { logsQueryKeys } from '../lib/query-keys'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -70,7 +71,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
-  const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const fetchingLogs = useIsFetching({ queryKey: logsQueryKeys.all })
 
   const [filters, setFilters] = useState<TaskLogsFilters>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -125,7 +126,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         page: 1,
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
+    queryClient.invalidateQueries({ queryKey: logsQueryKeys.all })
   }, [filters, navigate, props.logCategory, queryClient])
 
   const handleReset = useCallback(() => {
@@ -142,7 +143,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         endTime: end.getTime(),
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
+    queryClient.invalidateQueries({ queryKey: logsQueryKeys.all })
   }, [navigate, props.logCategory, queryClient])
 
   const handleKeyDown = useCallback(

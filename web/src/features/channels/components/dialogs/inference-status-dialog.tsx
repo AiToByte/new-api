@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { channelsQueryKeys } from '@/features/channels/lib'
 import { toIntlLocale } from '@/i18n/languages'
 import {
   ADMIN_PERMISSION_ACTIONS,
@@ -85,7 +86,10 @@ export function InferenceStatusDialog(props: InferenceStatusDialogProps) {
       ADMIN_PERMISSION_ACTIONS.WRITE
     )
   const query = useQuery({
-    queryKey: ['channels', props.channelId, props.provider, 'inference-status'],
+    queryKey: channelsQueryKeys.inferenceStatus(
+      props.channelId,
+      props.provider
+    ),
     queryFn: async ({ signal }) => {
       const snapshot = await getInferenceStatus(
         props.channelId,

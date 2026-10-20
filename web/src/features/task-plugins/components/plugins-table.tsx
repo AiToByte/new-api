@@ -45,6 +45,7 @@ import {
   TaskPluginUsageError,
 } from '../api'
 import { isStaleFactoryOverride } from '../lib/marketplace'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { TaskPluginListItem, TaskPluginUsage } from '../types'
 import { PluginCard } from './plugin-card'
 import { PluginIcon } from './plugin-icon'
@@ -75,7 +76,7 @@ export function PluginsTable(props: PluginsTableProps) {
     enabled: boolean
   } | null>(null)
   const pluginsQuery = useQuery({
-    queryKey: ['task-plugins'],
+    queryKey: taskPluginsQueryKeys.all,
     queryFn: listTaskPlugins,
   })
   const statusMutation = useMutation({
@@ -89,7 +90,7 @@ export function PluginsTable(props: PluginsTableProps) {
       options?: { cascade?: boolean; force?: boolean }
     }) => setTaskPluginStatus(key, enabled, options),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
       setStatusConfirmation(null)
       setStatusTarget(null)
       setBlockedAction(null)
@@ -118,7 +119,7 @@ export function PluginsTable(props: PluginsTableProps) {
       setBlockedAction(null)
       setBlockedUsage(null)
       toast.success(t('Plugin version deleted'))
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
     },
     onError: (error) => {
       if (error instanceof TaskPluginUsageError) {

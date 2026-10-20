@@ -37,11 +37,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { pricingQueryKeys } from '@/features/pricing/lib/query-keys'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
 import { previewUpstreamDiff, syncUpstream } from '../../api'
 import { getSyncLocaleOptions } from '../../constants'
+import { modelsQueryKeys, vendorsQueryKeys } from '../../lib/query-keys'
 import type {
   MetadataSyncCandidate,
   MetadataSyncField,
@@ -130,8 +132,8 @@ export function SyncWizardDialog(props: {
     },
     onSuccess: async () => {
       await Promise.all(
-        ['models', 'vendors', 'pricing'].map((key) =>
-          queryClient.invalidateQueries({ queryKey: [key] })
+        [modelsQueryKeys.all, vendorsQueryKeys.all, pricingQueryKeys.all].map(
+          (queryKey) => queryClient.invalidateQueries({ queryKey })
         )
       )
       setStep(3)

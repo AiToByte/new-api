@@ -44,6 +44,8 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { RegisteredVChart, VCHART_OPTION, withChartChrome } from '@/lib/vchart'
 
+import { dashboardQueryKeys } from '../../lib/query-keys'
+
 let themeManagerPromise: Promise<
   (typeof import('@visactor/vchart/esm/theme/theme-manager'))['ThemeManager']
 > | null = null
@@ -140,7 +142,7 @@ export function UserCharts(props: UserChartsProps) {
   }, [resolvedTheme])
 
   const { data: userData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'user-quota', timeRange],
+    queryKey: dashboardQueryKeys.userQuota(timeRange),
     queryFn: async () =>
       requireServerSuccess(await getUserQuotaDataByUsers(timeRange)),
     select: (res) => (res.success ? res.data : []),

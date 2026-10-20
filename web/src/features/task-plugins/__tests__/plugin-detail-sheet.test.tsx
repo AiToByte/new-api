@@ -25,6 +25,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { PluginDetailSheet } from '../components/plugin-detail-sheet'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type {
   TaskPluginDetail,
   TaskPluginListItem,
@@ -401,7 +402,9 @@ test('closing and reopening resets navigation and restores focus to the opener',
 test('detail loading and failure show feedback and retry recovers the overview', async () => {
   const fixture = renderSheet({})
   fixture.unmount()
-  fixture.queryClient.removeQueries({ queryKey: ['task-plugin', 'kling'] })
+  fixture.queryClient.removeQueries({
+    queryKey: taskPluginsQueryKeys.detail('kling'),
+  })
   let rejectRequest!: (reason: Error) => void
   const request = vi.spyOn(api, 'get').mockImplementationOnce(
     () =>
@@ -450,7 +453,7 @@ test('version loading and failure allow retry without hiding the overview', asyn
   const user = userEvent.setup()
   const fixture = renderSheet({})
   fixture.unmount()
-  fixture.queryClient.removeQueries({ queryKey: ['task-plugin-versions'] })
+  fixture.queryClient.removeQueries({ queryKey: taskPluginsQueryKeys.versions })
   let rejectRequest!: (reason: Error) => void
   const request = vi.spyOn(api, 'get').mockImplementationOnce(
     () =>

@@ -45,6 +45,7 @@ import {
 import { shouldShowBillingSource } from '../lib/billing-source'
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
+import { logsQueryKeys } from '../lib/query-keys'
 import { fetchLogsByCategory } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
@@ -99,7 +100,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const searchParams = route.useSearch()
   const userId = useAuthStore((state) => state.auth.user?.id)
   const { data: showBillingSource = false } = useQuery({
-    queryKey: ['usage-log-billing-source', isAdmin, userId],
+    queryKey: logsQueryKeys.billingSource(isAdmin, userId),
     enabled: logCategory === 'common' && userId != null,
     queryFn: async () => {
       if (isAdmin) {
@@ -161,16 +162,15 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: [
-      'logs',
+    queryKey: logsQueryKeys.list(
       logCategory,
       viewAccess,
       pagination.pageIndex + 1,
       pagination.pageSize,
       columnFilters,
       searchParams,
-      t,
-    ],
+      t
+    ),
     queryFn: async () => {
       const result = await fetchLogsByCategory({
         logCategory,

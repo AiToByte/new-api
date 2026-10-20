@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils'
 
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
+import { logsQueryKeys } from '../lib/query-keys'
 import { buildApiParams } from '../lib/utils'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
@@ -55,7 +56,7 @@ export function CommonLogsStats() {
   const { sensitiveVisible } = useUsageLogsContext()
 
   const { data: stats, isLoading } = useQuery({
-    queryKey: ['usage-logs-stats', isAdmin, searchParams],
+    queryKey: logsQueryKeys.statsFor(isAdmin, searchParams),
     queryFn: async () => {
       const params = buildApiParams({
         page: 1,

@@ -24,6 +24,7 @@ import { ProviderBadge } from '@/components/provider-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import type { PluginIconInput } from '@/features/task-plugins/lib/plugin-icon'
+import { taskPluginsQueryKeys } from '@/features/task-plugins/lib/query-keys'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -77,7 +78,7 @@ export function TaskPluginChannelBadge(props: { pluginKey?: string }) {
     ADMIN_PERMISSION_ACTIONS.BIND
   )
   const query = useQuery({
-    queryKey: ['task-plugin-options'],
+    queryKey: taskPluginsQueryKeys.options,
     queryFn: async () => requireServerSuccess(await getTaskPluginOptions()),
     enabled: Boolean(props.pluginKey) && canBind,
     staleTime: 60 * 1000,

@@ -54,6 +54,7 @@ import {
   getTaskPlugin,
   getTaskPluginVersions,
 } from '../api'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { TaskPluginListItem } from '../types'
 import { JavaScriptViewer } from './javascript-viewer'
 import { PluginIcon } from './plugin-icon'
@@ -89,17 +90,17 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
   const [sandboxVisited, setSandboxVisited] = useState(false)
   const [compareVersion, setCompareVersion] = useState('')
   const detailQuery = useQuery({
-    queryKey: ['task-plugin', key],
+    queryKey: taskPluginsQueryKeys.detail(key),
     queryFn: () => getTaskPlugin(key),
     enabled: Boolean(key),
   })
   const versionsQuery = useQuery({
-    queryKey: ['task-plugin-versions', key],
+    queryKey: taskPluginsQueryKeys.versionsOf(key),
     queryFn: () => getTaskPluginVersions(key),
     enabled: Boolean(key),
   })
   const compareQuery = useQuery({
-    queryKey: ['task-plugin', key, compareVersion],
+    queryKey: taskPluginsQueryKeys.detailWithVersion(key, compareVersion),
     queryFn: () => getTaskPlugin(key, compareVersion),
     enabled: Boolean(key && compareVersion),
   })
@@ -108,9 +109,13 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
     onSuccess: () => {
       setCompareVersion('')
       toast.success(t('Plugin version activated'))
-      queryClient.invalidateQueries({ queryKey: ['task-plugins'] })
-      queryClient.invalidateQueries({ queryKey: ['task-plugin', key] })
-      queryClient.invalidateQueries({ queryKey: ['task-plugin-versions', key] })
+      queryClient.invalidateQueries({ queryKey: taskPluginsQueryKeys.all })
+      queryClient.invalidateQueries({
+        queryKey: taskPluginsQueryKeys.detail(key),
+      })
+      queryClient.invalidateQueries({
+        queryKey: taskPluginsQueryKeys.versionsOf(key),
+      })
     },
     onError: (error) => handleServerError(error),
   })

@@ -66,6 +66,7 @@ import {
   deleteStaleSystemInstances,
   listSystemInstances,
 } from '../api'
+import { systemInfoQueryKeys } from '../lib/query-keys'
 import type { SystemInstance, SystemInstanceStatus } from '../types'
 
 const INSTANCE_POLL_INTERVAL_MS = 30_000
@@ -498,7 +499,7 @@ export function SystemInstancesPanel() {
   const [deleteAllConfirmOpen, setDeleteAllConfirmOpen] = useState(false)
   const [deletingNodeName, setDeletingNodeName] = useState<string | null>(null)
   const instancesQuery = useQuery({
-    queryKey: ['system-info', 'instances'],
+    queryKey: systemInfoQueryKeys.instances,
     queryFn: async () => {
       const res = await listSystemInstances()
       if (!res.success || !Array.isArray(res.data)) {
@@ -521,7 +522,7 @@ export function SystemInstancesPanel() {
 
   const invalidateInstances = async () => {
     await queryClient.invalidateQueries({
-      queryKey: ['system-info', 'instances'],
+      queryKey: systemInfoQueryKeys.instances,
     })
   }
 

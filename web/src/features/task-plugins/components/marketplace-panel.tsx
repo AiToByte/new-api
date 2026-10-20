@@ -40,6 +40,7 @@ import {
   isDefaultMarketplaceSource,
   parseMarketplaceIndex,
 } from '../lib/marketplace'
+import { taskPluginsQueryKeys } from '../lib/query-keys'
 import type { MarketplaceIndex, MarketplaceSource } from '../types'
 import {
   MarketplaceInstallDialog,
@@ -56,11 +57,11 @@ export function MarketplacePanel() {
     useState<MarketplaceInstallTarget | null>(null)
 
   const sourcesQuery = useQuery({
-    queryKey: ['task-plugin-marketplace-sources'],
+    queryKey: taskPluginsQueryKeys.marketplaceSources,
     queryFn: listMarketplaceSources,
   })
   const installedQuery = useQuery({
-    queryKey: ['task-plugins'],
+    queryKey: taskPluginsQueryKeys.all,
     queryFn: listTaskPlugins,
   })
   const sources = sourcesQuery.data ?? []
@@ -71,7 +72,7 @@ export function MarketplacePanel() {
   // Only the selected source is requested. Alternate sources stay idle until
   // the administrator explicitly switches to them.
   const indexQuery = useQuery({
-    queryKey: ['task-plugin-marketplace', selectedSource?.index_url],
+    queryKey: taskPluginsQueryKeys.marketplaceFor(selectedSource?.index_url),
     enabled: Boolean(selectedSource),
     retry: false,
     meta: { errorToast: false },

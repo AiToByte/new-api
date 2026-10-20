@@ -48,6 +48,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getPaymentErrorTranslation } from '@/features/wallet/lib/payment'
 import { handleServerError } from '@/lib/handle-server-error'
+import { globalQueryKeys } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
 
 import { confirmPaymentCompliance } from '../api'
@@ -339,7 +340,9 @@ export function PaymentSettingsSection({
       if (data.success) {
         toast.success(t('Compliance confirmed successfully'))
         setShowComplianceDialog(false)
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
+        queryClient.invalidateQueries({
+          queryKey: globalQueryKeys.systemOptions,
+        })
       } else {
         handleServerError(data, t('Failed to confirm compliance'))
       }
@@ -754,7 +757,9 @@ export function PaymentSettingsSection({
         }
         setWaffoPancakeSavedBinding(savedBinding)
         setWaffoPancakeSelection(savedBinding)
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
+        queryClient.invalidateQueries({
+          queryKey: globalQueryKeys.systemOptions,
+        })
         toast.success(t('Waffo Pancake settings saved'))
         return
       }
