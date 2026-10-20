@@ -335,8 +335,12 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	// Option 表 key 列去重重建是计费/定价等关键配置的唯一权威来源：
+	// 主键不唯一时 FirstOrCreate/Save 会反复制造重复行，且读取到的
+	// ModelRatio 等配置取决于行序，静默继续会带病运行。因此失败必须
+	// 终止启动，由运维按日志处置（原始行已备份在 options_legacy_* 表）。
 	if err := migrateOptionPrimaryKey(DB); err != nil {
-		common.SysError(common.LogText("failed to migrate options primary key: %s", err.Error()))
+		return fmt.Errorf("migrate options primary key: %w", err)
 	}
 
 	err := DB.AutoMigrate(

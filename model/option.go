@@ -350,9 +350,13 @@ func updateOptionMap(key string, value string) (err error) {
 		common.OptionMapRWMutex.Unlock()
 		return nil
 	}
+	// 锁只包住 map 写入本身。OptionMap 的读者要么持 RLock、要么本就不持锁
+	// 直读（controller/misc.go 等），包变量的赋值从来不靠这把锁提供可见性；
+	// 把 JSON 解析、config 系统分发与包变量赋值留在临界区外，只缩短写写
+	// 排队，不改变任何读者可见的值组合。
 	common.OptionMapRWMutex.Lock()
-	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
+	common.OptionMapRWMutex.Unlock()
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
