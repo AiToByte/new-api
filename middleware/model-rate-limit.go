@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"net/http"
@@ -26,50 +28,99 @@ const (
 	modelRateLimitTimeFormat              = "2006-01-02T15:04:05.000Z"
 )
 
-// 检查Redis中的请求限制
-func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (bool, error) {
-	// 如果maxCount为0，表示不限制
-	if maxCount == 0 {
-		return true, nil
-	}
+// redisSuccessWindowScript 是「成功数滑动窗口」的一次性原子操作：
+// 清理超窗条目 → 按需预留席位 → 给出判定。
+//
+// 为什么必须是单次 Lua 而不是两次往返：旧实现用 LLen 统计、再 LIndex(-1)
+// 取最老条目判定，两次往返之间其他请求的预留/清除可能插入，导致判定依据
+// 的列表状态失真；占用统计又发生在请求处理完成之后，判定完全不消耗，并
+// 发突发可以成批越过上限。Redis 串行执行脚本，「预留」与「判定」在同一
+// 次调用内完成，并发的每个判定读到的窗口状态严格递增。
+//
+// 条目形态兼容：历史数据是纯时间戳字符串，预留席位是「时间戳:随机值」。
+// 两类条目都以 24 字符 UTC 毫秒时间戳开头，定长格式下字典序即时间序，
+// 过期清理（LINDEX 尾部比较）对两种形态统一成立。
+var redisSuccessWindowScript = redis.NewScript(`
+local key = KEYS[1]
+local maxCount = tonumber(ARGV[1])
+local cutoff = ARGV[2]
+local admission = ARGV[3]
+local ttlSeconds = tonumber(ARGV[4])
 
-	// 获取当前计数
-	length, err := rdb.LLen(ctx, key).Result()
-	if err != nil {
-		return false, err
-	}
+-- LPush 保持最新条目在队头，队尾即最老条目；
+-- 值小于窗口起点（cutoff）的条目已完全滑出时间窗，安全丢弃。
+while true do
+  local oldest = redis.call('LINDEX', key, -1)
+  if not oldest or oldest >= cutoff then
+    break
+  end
+  redis.call('RPOP', key)
+end
 
-	// 如果未达到限制，允许请求
-	if length < int64(maxCount) {
-		return true, nil
-	}
+-- 活跃窗口在华每次检查时续期，低频用户不需要跨 TTL 重建窗口。
+if ttlSeconds > 0 then
+  redis.call('EXPIRE', key, ttlSeconds)
+end
 
-	// 检查时间窗口
-	oldTimeStr, err := rdb.LIndex(ctx, key, -1).Result()
-	if err != nil {
-		return false, err
-	}
-	oldTime, err := time.Parse(modelRateLimitTimeFormat, oldTimeStr)
-	if err != nil {
-		return false, err
-	}
+-- 窗口未满：预留席位（即本次请求的会计记录）并放行；满员则拒绝。
+local length = redis.call('LLEN', key)
+if length < maxCount then
+  redis.call('LPUSH', key, admission)
+  return 1
+end
+return 0
+`)
 
-	nowTimeStr := time.Now().UTC().Format(modelRateLimitTimeFormat)
-	nowTime, err := time.Parse(modelRateLimitTimeFormat, nowTimeStr)
-	if err != nil {
-		return false, err
+// admissionNonce 为席位值生成随机后缀。时间戳仅毫秒分辨率，同一毫秒内
+// 的两次预留若不追加随机值，失败释放时 LREM 会按值误删他人的席位。
+func admissionNonce() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand 失败降低为纳秒时间戳；同毫秒碰撞概率极小，
+		// 误删一个席位只相当于该用户少计一次成功请求，可接受。
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
-	// 如果在时间窗口内已达到限制，拒绝请求
-	subTime := nowTime.Sub(oldTime).Seconds()
-	if int64(subTime) < duration {
-		rdb.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
-		return false, nil
-	}
-
-	return true, nil
+	return hex.EncodeToString(buf[:])
 }
 
-// 记录Redis请求
+// reserveRedisSuccessSlot 原子地完成「检查 + 预留成功数席位」：
+// 返回 allowed=true 时键内已预置一个席位（值为返回的令牌），请求以失败
+// 收场时必须调用 releaseRedisSuccessSlot 归还；成功时席位自然留存为成功
+// 记录，无需再补记。maxCount 为 0 表示不限流，不做任何 Redis 操作。
+func reserveRedisSuccessSlot(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (admission string, allowed bool, err error) {
+	if maxCount == 0 {
+		return "", true, nil
+	}
+
+	now := time.Now().UTC()
+	// cutoff 为窗口起点的时间戳字符串，仅与条目值做定长前缀比较
+	cutoff := now.Add(-time.Duration(duration) * time.Second).Format(modelRateLimitTimeFormat)
+	admission = now.Format(modelRateLimitTimeFormat) + ":" + admissionNonce()
+
+	allowedInt, err := redisSuccessWindowScript.Run(ctx, rdb, []string{key}, maxCount, cutoff, admission, duration).Int()
+	if err != nil {
+		return "", false, err
+	}
+	if allowedInt != 1 {
+		// 拒绝路径未预置席位，令牌必须为空，调用方据此判断是否需要释放
+		return "", false, nil
+	}
+	return admission, true, nil
+}
+
+// releaseRedisSuccessSlot 归还一次预留席位。令牌携带随机后缀、全值唯一，
+// LREM count=1 只会精确移除本次预留的条目。空令牌（不限流路径或历史
+// fail-open 场景）直接跳过，保持该函数可无条件调用。
+func releaseRedisSuccessSlot(ctx context.Context, rdb *redis.Client, key string, admission string) {
+	if admission == "" {
+		return
+	}
+	if _, err := rdb.LRem(ctx, key, 1, admission).Result(); err != nil {
+		common.SysLog(common.LogText("failed to release model rate limit reservation: %s", err.Error()))
+	}
+}
+
+// 记录Redis请求（仅降级路径使用：预留检查 fail-open 时改为「请求成功后补记」的旧会计形态）
 func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxCount int) {
 	// 如果maxCount为0，不记录请求
 	if maxCount == 0 {
@@ -95,12 +146,12 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 		ctx := context.Background()
 		rdb := common.RDB
 
-		// 1. 检查成功请求数限制
+		// 1. 检查并预留成功请求数席位（检查即消耗，消除突发并发越过上限）。
+		// 基础设施故障 fail-open：逻辑同主限流器，误杀正常请求比漏过超限
+		// 请求代价更高；此时无席位可释放，回退为「请求成功后补记」的会计。
 		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, userId)
-		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration)
+		admission, allowed, err := reserveRedisSuccessSlot(ctx, rdb, successKey, successMaxCount, duration)
 		if err != nil {
-			// 基础设施故障 fail-open：逻辑同主限流器，误杀正常请求比
-			// 漏过超限请求代价更高；告警日志是唯一的防线。
 			logger.LogError(ctx, common.LogText("model rate limit fail-open: %s", err.Error()))
 			c.Next()
 			if modelRequestSucceeded(c) {
@@ -129,13 +180,15 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			if err != nil {
 				logger.LogError(ctx, common.LogText("model rate limit fail-open (total): %s", err.Error()))
 				c.Next()
-				if modelRequestSucceeded(c) {
-					recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+				if !modelRequestSucceeded(c) {
+					releaseRedisSuccessSlot(ctx, rdb, successKey, admission)
 				}
 				return
 			}
 
 			if !allowed {
+				// 请求未进入处理流程，成功数席位必须归还
+				releaseRedisSuccessSlot(ctx, rdb, successKey, admission)
 				abortWithOpenAiMessage(c, http.StatusTooManyRequests, i18n.T(c, i18n.MsgRateLimitTotalReached, map[string]any{"Minutes": setting.ModelRequestRateLimitDurationMinutes, "Max": totalMaxCount}))
 				return
 			}
@@ -144,9 +197,10 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 		// 4. 处理请求
 		c.Next()
 
-		// 5. 如果请求成功，记录成功请求
-		if modelRequestSucceeded(c) {
-			recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+		// 5. 席位即会计：成功请求保留预留席位成为成功记录，失败请求即时
+		// 释放；进程崩溃时的席位泄漏最多存活一个窗口 TTL，不再扩散。
+		if !modelRequestSucceeded(c) {
+			releaseRedisSuccessSlot(ctx, rdb, successKey, admission)
 		}
 	}
 }

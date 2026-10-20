@@ -37,9 +37,13 @@ func TestModelRedisRateLimitUsesUTCRegardlessOfLocalTimezone(t *testing.T) {
 	withinWindow := time.Now().UTC().Add(-30 * time.Second).Format(modelRateLimitTimeFormat)
 	_, err = redisServer.Push(checkKey, withinWindow, withinWindow)
 	require.NoError(t, err)
-	allowed, err := checkRedisRateLimit(ctx, redisClient, checkKey, 2, 60)
+	admission, allowed, err := reserveRedisSuccessSlot(ctx, redisClient, checkKey, 2, 60)
 	require.NoError(t, err)
 	assert.False(t, allowed, "an existing UTC timestamp inside the window must remain limited on a non-UTC host")
+	assert.Empty(t, admission, "满员拒绝路径不得预置席位")
+	count, err := redisClient.LLen(ctx, checkKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count, "拒绝路径不得改动窗口条目")
 }
 
 var modelRateLimitTestUsers atomic.Int64
@@ -159,4 +163,91 @@ func TestModelRedisRateLimitFailOpenOnInfraError(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/completed", "127.0.0.1:1001").Code)
 	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/completed", "127.0.0.1:1001").Code)
+}
+
+// 预留式判定必须清理滑出窗口的陈旧条目：旧实现（LLen 统计 + LIndex 判定）
+// 永远不会移除它们，低频用户的配额会被滞留条目永久占用。
+func TestRedisSuccessWindowPrunesStaleAdmissions(t *testing.T) {
+	_, redisClient := useRateLimitMiniRedis(t)
+	ctx := context.Background()
+	key := "rateLimit:model-prune"
+
+	// RPush 使最新条目位于队头、最旧条目位于队尾（与 LPush 语义一致）
+	fresh := time.Now().UTC().Add(-10 * time.Second).Format(modelRateLimitTimeFormat)
+	stale := time.Now().UTC().Add(-2 * time.Minute).Format(modelRateLimitTimeFormat)
+	_, err := redisClient.RPush(ctx, key, fresh, stale).Result()
+	require.NoError(t, err)
+
+	admission, allowed, err := reserveRedisSuccessSlot(ctx, redisClient, key, 2, 60)
+	require.NoError(t, err)
+	require.True(t, allowed, "清理超窗条目后窗口未满，必须放行")
+	require.NotEmpty(t, admission)
+	entries, err := redisClient.LRange(ctx, key, 0, -1).Result()
+	require.NoError(t, err)
+	assert.Equal(t, []string{admission, fresh}, entries, "陈旧席位必须被清理，不得继续占用配额")
+}
+
+// 预留席位全值唯一，拒绝路径不写入，成功释放后精确移除自己的席位，
+// 多次预留互不误伤（旧实现按值 LREM 会误删同毫秒的其他席位）。
+func TestRedisSuccessWindowReservationAndReleaseRoundtrip(t *testing.T) {
+	_, redisClient := useRateLimitMiniRedis(t)
+	ctx := context.Background()
+	key := "rateLimit:model-seat"
+
+	first, allowed, err := reserveRedisSuccessSlot(ctx, redisClient, key, 2, 60)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	second, allowed, err := reserveRedisSuccessSlot(ctx, redisClient, key, 2, 60)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.NotEqual(t, first, second, "同毫秒预留必须携带可区分的随机后缀")
+
+	_, allowed, err = reserveRedisSuccessSlot(ctx, redisClient, key, 2, 60)
+	require.NoError(t, err)
+	assert.False(t, allowed, "满窗后应拒绝并且不新增条目")
+	count, err := redisClient.LLen(ctx, key).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	releaseRedisSuccessSlot(ctx, redisClient, key, first)
+	entries, err := redisClient.LRange(ctx, key, 0, -1).Result()
+	require.NoError(t, err)
+	assert.Equal(t, []string{second}, entries, "释放必须精确移除对应席位")
+
+	releaseRedisSuccessSlot(ctx, redisClient, key, second)
+	count, err = redisClient.LLen(ctx, key).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+// 席位即会计：成功请求保留预留席位且不得重复补记（否则每次成功都被计
+// 两次，配额迅速打满）；拒绝请求不得增长条目。
+func TestModelRedisSuccessAdmissionIsRecordedOnce(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	gin.SetMode(gin.TestMode)
+	_, redisClient := useRateLimitMiniRedis(t)
+	userID := 7400000 + int(modelRateLimitTestUsers.Add(1))
+	router := gin.New()
+	router.GET("/", func(c *gin.Context) { c.Set("id", userID) }, redisRateLimitHandler(60, 0, 2), func(c *gin.Context) {
+		status := relaycommon.NewStreamStatus()
+		status.MarkCompleted()
+		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
+		c.Status(http.StatusOK)
+	})
+	ctx := context.Background()
+	successKey := fmt.Sprintf("rateLimit:%s:%d", ModelRequestRateLimitSuccessCountMark, userID)
+
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/", "127.0.0.1:1000").Code)
+	count, err := redisClient.LLen(ctx, successKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "首次成功必须且只应留下一席")
+	assert.Equal(t, http.StatusOK, performRateLimitRequest(router, "/", "127.0.0.1:1000").Code)
+	count, err = redisClient.LLen(ctx, successKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count, "第二次成功后满窗（max=2）")
+	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/", "127.0.0.1:1000").Code)
+	count, err = redisClient.LLen(ctx, successKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count, "拒绝路径不得增长条目")
+	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/", "127.0.0.1:1000").Code)
 }
