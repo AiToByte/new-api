@@ -962,6 +962,21 @@ func DeleteDisabledChannel() (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
+// UpdateChannelKey persists a channel's key column by id.
+func UpdateChannelKey(id int, key string) error {
+	return DB.Model(&Channel{}).Where("id = ?", id).Update("key", key).Error
+}
+
+// GetDisabledChannelIDs returns the ids of auto- and manually-disabled
+// channels, e.g. so callers can close live sockets before deletion.
+func GetDisabledChannelIDs() ([]int, error) {
+	var ids []int
+	err := DB.Model(&Channel{}).
+		Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {
 	return GetPaginatedChannelTags(DB.Model(&Channel{}), offset, limit)
 }
