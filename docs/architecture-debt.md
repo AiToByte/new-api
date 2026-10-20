@@ -271,7 +271,7 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 | Phase 0 地基 | 4 | 0.1✅；0.2 门禁子集✅；0.3✅（前端 65MB/入口 5MB/后端 154MB；延迟待 staging 回填）；0.4✅（2 黄金测试 + `TestSendUpstreamPolicies`） | ✅ 完成 |
 | Phase 1 relay 核心 | 6 | 1.1✅（BaseAdaptor，101 桩删除）；1.2✅；1.3✅（SendUpstream，9 文件 10 站点；image/websocket 除外）；1.4✅（SettleUsage，3 判定点；9 直调点有意不动）；1.5✅（override 4 文件）；1.6✅（task_info/body_fields） | ✅ 完成 |
 | Phase 2 计费结算 | 4 | 2.1✅（usedVars 收敛+文档化分歧）；2.2✅（实证无代码）；2.3✅（LRU）；2.4✅（评估不搬） | ✅ 完成 |
-| Phase 3 越层治理 | 6 | 3.1✅（CI 门禁）；3.2 slice-1✅（subscription 写路径）/slice-2✅（channel 查询构造）；3.3✅；3.4✅；3.5✅；3.6 部分✅（hasEnabledMultiKey、processChannelError；SearchChannels 内存分页需过滤下沉设计，延期） | 进行中（剩 37 文件下沉） |
+| Phase 3 越层治理 | 6 | 3.1✅（CI 门禁）；3.2 slice-1✅（subscription 写路径）/slice-2✅（channel 查询构造）；3.3✅；3.4✅；3.5✅；3.6 部分✅（hasEnabledMultiKey、processChannelError；SearchChannels 内存分页需过滤下沉设计，延期） | 进行中（controller 直接 `model.DB` 引用 12→5 生产文件；见 §八） |
 | Phase 4 前端 | 7 | 4.1✅（删 7 死组件+去 2 依赖、knip 去盲区、13 重复头清零）；4.2✅（section registry lazy + 22 路由收敛）；4.5✅（163→18 内联 query key） | 进行中（4.3/4.4/4.6/4.7 未动） |
 | Phase 5 全局状态 | 5 | 0 | 未开始 |
 
@@ -367,3 +367,30 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 前端 `build` + `check:budget`：初始 JS 232.9KB / CSS 60.0KB gz（预算 245KB / 65KB），PASS。
 - 已知边界：模型限流席位在进程崩溃时最多滞留一个窗口 TTL（设计内，注释已说明）；`updateOptionMap` 的 340 行 switch 未动（Phase 5.3 范围）。
 - 提交：`cf423afa2`（D8）、`5714aabae`（D10）、`3e91c756b`（4.5）。
+
+## 八、Phase 3.2 越层下沉批次（2026-10-20 续）
+
+策略与 3.2 一脉相承：把 controller 里裸 `model.DB`/`model.LOG_DB`/`.Transaction(` 调用下沉。按域逐个下沉，每个提交都复核 `gofmt`/`go build`/`go vet` + 相关子集测试 + layering 扫描全绿后才提交。
+
+### 8.1 改动清单（按提交）
+
+| 提交 | 域 | 内容 |
+|---|---|---|
+| `c92e566e1` | 模型元数据 | `model.GetModelMetadata`/`UpdateModelStatus`；新 `service/model_metadata.go` seam（含 `GetMetadataSyncState`，由 service 供 `model.DB`）；`model_meta.go`/`model_sync.go` 改道 |
+| `37b02bdf9` | channel 上游模型更新 | 新 `service/channel_upstream_scan.go`（`ListEnabledChannelsForUpstreamUpdate`/`CountEnabledChannels`/`UpdateChannelUpstreamModelSettings`）；扫描循环内联查询收敛进 `findEnabledChannelsAfterID`（二者字节等价，DRY） |
+| `c73514fcf` | channel 数据访问 | `model.UpdateChannelKey`/`GetDisabledChannelIDs`；`codex_usage.go`/`channel.go` 改道 |
+| `89c96a91b` | 任务 | `(*model.Task).UpdatePrivateData` 方法；`plugin_protocol.go` 背景标志写改道（台账点名的 367 行） |
+| `fda022900` | 订阅计划 | `model.ListSubscriptionPlans`/`ListEnabledSubscriptionPlans` + service 包装；`subscription.go` 两个列表读改道 |
+
+### 8.2 进度
+
+- controller 生产文件直接 `model.DB`/`model.LOG_DB`/`.Transaction(` 引用：**12 → 5**（`channel-test.go`、`oauth.go`、`setup.go`、`user.go`、`wechat.go`）。
+- 剩余 5 文件均涉及事务或根账号创建：`oauth`/`wechat`/`user` 各有 `DB.Transaction`，`setup` 建 root user + Setup 记录，`channel-test.go` 做 root user 查找——需逐事务核对「哪些步骤必须同事务、哪些抽离后仍是原子」后再下沉，单列下一批。
+- 验收口径拆分：`model.DB` 直调归零按上面的 12→5 推进（可机械扫描复核）；「不 import service 的 40 文件 → 个位数」是独立口径，本次给 `model_meta.go`/`model_sync.go`/`subscription.go` 等补上 service 依赖，纯数据访问的单列下沉（codex key、task private_data）按既有 `model.DeleteDisabledChannel()` 惯例直连 model，不强制加 service 层。
+
+### 8.3 验证
+
+- 每提交 `gofmt -l` 无输出、`go build`/`go vet ./controller/ ./model/ ./service/` 零告警。
+- 子集回归（三方言矩阵，DSN 缺省走 sqlite 分支）：metadata `TestModelManagementDatabaseMatrix|TestMetadataSync…|TestModelDeletion…` 14.8s✅；channel `Upstream|AdvancedCustom` 7.5s✅；`Channel|Codex` 22.3s✅；`Plugin|Subscription` 8.1s✅。
+- layering 扫描（`rg 'model\.(DB|LOG_DB)|\.Transaction\(' controller/ --glob '!*_test.go'`）逐提交复核，移除项逐条确认。
+- 全 controller 全量仍受 Windows SQLite 文件锁/多 DB 池影响，看门禁以 CI（Linux）为准（同 3.3 既有结论）。
