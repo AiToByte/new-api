@@ -200,6 +200,13 @@ func DeleteRedemptionBatch(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		common.ApiErrorT(c, "Invalid parameters")
+		// 批量删除是高危操作，参数非法的尝试同样要留痕：否则构造畸形请求
+		// 就能在不产生任何审计记录的情况下反复试探删除接口。
+		recordManageAuditFailure(c, "redemption.delete_batch", map[string]any{
+			"count":  int64(0),
+			"total":  0,
+			"reason": "invalid_request",
+		})
 		return
 	}
 	count, err := model.BatchDeleteRedemptions(request.Ids)
