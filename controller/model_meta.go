@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -91,16 +92,16 @@ func GetModelMeta(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	var m model.Model
-	if err := model.DB.First(&m, id).Error; err != nil {
+	m, err := service.GetModelMetadata(id)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := enrichModels([]*model.Model{&m}); err != nil {
+	if err := enrichModels([]*model.Model{m}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, &m)
+	common.ApiSuccess(c, m)
 }
 
 // CreateModelMeta 新建模型
@@ -156,7 +157,7 @@ func UpdateModelMeta(c *gin.Context) {
 			return
 		}
 		// 只更新状态，防止误清空其他字段
-		if err := model.DB.Model(&model.Model{}).Where("id = ?", m.Id).Update("status", m.Status).Error; err != nil {
+		if err := service.UpdateModelStatus(m.Id, m.Status); err != nil {
 			common.ApiError(c, err)
 			return
 		}

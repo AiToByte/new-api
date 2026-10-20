@@ -17,6 +17,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -320,7 +321,7 @@ func SyncUpstreamPreview(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	locals, vendors, err := model.GetMetadataSyncState(model.DB)
+	locals, vendors, err := service.GetMetadataSyncState()
 	if err != nil {
 		common.ApiError(c, err)
 		return

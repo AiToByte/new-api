@@ -269,6 +269,22 @@ func (mi *Model) Update() error {
 	})
 }
 
+// GetModelMetadata returns a single model metadata record by primary key.
+// Controllers reach this through the service seam instead of referencing DB
+// directly, keeping the layering guard clean.
+func GetModelMetadata(id int) (*Model, error) {
+	var m Model
+	if err := DB.First(&m, id).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// UpdateModelStatus flips only the catalog visibility of a single model.
+func UpdateModelStatus(id int, status int) error {
+	return DB.Model(&Model{}).Where("id = ?", id).Update("status", status).Error
+}
+
 func (mi *Model) Delete() error {
 	_, err := DeleteModelMetadata([]int{mi.Id}, false, false)
 	return err
