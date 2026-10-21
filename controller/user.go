@@ -23,7 +23,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
@@ -293,8 +292,8 @@ func Register(c *gin.Context) {
 	}
 
 	// 获取插入后的用户ID
-	var insertedUser model.User
-	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
+	insertedUser, err := model.GetUserByUsername(cleanUser.Username)
+	if err != nil {
 		common.ApiErrorT(c, "User registration failed or user ID retrieval failed")
 		return
 	}
@@ -679,15 +678,8 @@ func UpdateUser(c *gin.Context) {
 		auditParams["password_reset"] = updatePassword
 		auditParams["admin_permissions_updated"] = updatedUser.AdminPermissions != nil
 	}
-	authzTouched := false
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
-			return err
-		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
-		authzTouched = touched
-		return err
-	}); err != nil {
+	authzTouched, err := service.UpdateAdminUserWithPermissions(&updatedUser, updatePassword, updatedUser.AdminPermissions, c.GetInt("role"))
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -1006,15 +998,8 @@ func CreateUser(c *gin.Context) {
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
 	}
-	authzTouched := false
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
-			return err
-		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
-		authzTouched = touched
-		return err
-	}); err != nil {
+	authzTouched, err := service.CreateAdminUserWithPermissions(&cleanUser, user.AdminPermissions, c.GetInt("role"))
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -1033,22 +1018,6 @@ func CreateUser(c *gin.Context) {
 		"message": "",
 	})
 	return
-}
-
-func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, userRole int, permissions map[string]map[string]bool) (bool, error) {
-	if permissions == nil {
-		if userRole < common.RoleAdminUser && c.GetInt("role") == common.RoleRootUser {
-			return true, authz.ClearUserAuthorizationInTx(tx, userID)
-		}
-		return false, nil
-	}
-	if c.GetInt("role") != common.RoleRootUser {
-		return false, fmt.Errorf("only root can update admin permissions")
-	}
-	if userRole < common.RoleAdminUser {
-		return true, authz.ClearUserAuthorizationInTx(tx, userID)
-	}
-	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
 }
 
 type ManageRequest struct {
@@ -1071,12 +1040,9 @@ func ManageUser(c *gin.Context) {
 		manageUserQuota(c, req)
 		return
 	}
-	user := model.User{
-		Id: req.Id,
-	}
-	// Fill attributes
-	model.DB.Unscoped().Where(&user).First(&user)
-	if user.Id == 0 {
+	// Fill attributes (including soft-deleted rows)
+	user, err := model.GetUserByIdUnscoped(req.Id)
+	if err != nil || user.Id == 0 {
 		common.ApiErrorT(c, "User does not exist")
 		return
 	}
@@ -1155,12 +1121,7 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 	if req.Action == "demote" {
-		if err := model.DB.Transaction(func(tx *gorm.DB) error {
-			if err := user.UpdateWithTx(tx, false); err != nil {
-				return err
-			}
-			return authz.ClearUserAuthorizationInTx(tx, user.Id)
-		}); err != nil {
+		if err := service.DemoteUser(user); err != nil {
 			common.ApiError(c, err)
 			return
 		}

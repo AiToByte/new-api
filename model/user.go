@@ -482,6 +482,22 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	return &user, err
 }
 
+// GetUserByIdUnscoped reads a user by id including soft-deleted rows.
+func GetUserByIdUnscoped(id int) (*User, error) {
+	user := User{Id: id}
+	err := DB.Unscoped().Where(&user).First(&user).Error
+	return &user, err
+}
+
+// GetUserByUsername reads a user by username (password column included).
+func GetUserByUsername(username string) (*User, error) {
+	var user User
+	if err := DB.Where("username = ?", username).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetSelfUserById reads dashboard profile data and password existence in one
 // query. The password hash and management access token are never selected.
 func GetSelfUserById(id int) (*User, error) {
