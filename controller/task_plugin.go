@@ -6,20 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -100,7 +98,7 @@ func UploadTaskPlugin(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err = syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+	if err = service.SyncTaskPluginsOnceContext(c.Request.Context()); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -131,22 +129,13 @@ type taskPluginListItem struct {
 	InFlightCount int64          `json:"in_flight_count"`
 }
 
-type taskPluginRebuildOutcome struct {
-	Status           string    `json:"status"`
-	AttemptedAt      time.Time `json:"attempted_at"`
-	Generation       uint64    `json:"generation"`
-	DatabaseRevision string    `json:"database_revision,omitempty"`
-	PluginErrorCount int       `json:"plugin_error_count"`
-	Error            string    `json:"error,omitempty"`
-}
-
 type taskPluginRuntimeStatus struct {
-	CurrentGeneration     uint64                   `json:"current_generation"`
-	GenerationPublishedAt time.Time                `json:"generation_published_at"`
-	DatabaseRevision      string                   `json:"database_revision"`
-	DatabaseError         string                   `json:"database_error,omitempty"`
-	LastRebuild           taskPluginRebuildOutcome `json:"last_rebuild"`
-	PluginErrors          map[string]string        `json:"plugin_errors"`
+	CurrentGeneration     uint64                           `json:"current_generation"`
+	GenerationPublishedAt time.Time                        `json:"generation_published_at"`
+	DatabaseRevision      string                           `json:"database_revision"`
+	DatabaseError         string                           `json:"database_error,omitempty"`
+	LastRebuild           service.TaskPluginRebuildOutcome `json:"last_rebuild"`
+	PluginErrors          map[string]string                `json:"plugin_errors"`
 }
 
 func ListTaskPlugins(c *gin.Context) {
@@ -177,9 +166,7 @@ func ListTaskPlugins(c *gin.Context) {
 	}
 
 	runtimeErrors := jsplugin.DefaultRegistry.RoutingErrors()
-	taskPluginSyncState.Lock()
-	maps.Copy(runtimeErrors, taskPluginSyncState.errors)
-	taskPluginSyncState.Unlock()
+	service.TaskPluginSyncPluginErrors(runtimeErrors)
 
 	items := make([]taskPluginListItem, 0, len(keys))
 	for key := range keys {
@@ -257,15 +244,13 @@ func GetTaskPluginRuntime(c *gin.Context) {
 	routingStatus := jsplugin.DefaultRegistry.RoutingStatus()
 	pluginErrors := routingStatus.Errors
 
-	taskPluginSyncState.Lock()
-	maps.Copy(pluginErrors, taskPluginSyncState.errors)
-	lastRebuild := taskPluginSyncState.lastRebuild
+	service.TaskPluginSyncPluginErrors(pluginErrors)
+	lastRebuild := service.TaskPluginSyncLastRebuild()
 	lastDatabaseRevision := lastRebuild.DatabaseRevision
-	taskPluginSyncState.Unlock()
 
 	registryRebuild := routingStatus.LastRebuild
 	if lastRebuild.AttemptedAt.Before(registryRebuild.AttemptedAt) {
-		lastRebuild = taskPluginRebuildOutcome{
+		lastRebuild = service.TaskPluginRebuildOutcome{
 			Status:      registryRebuild.Status,
 			AttemptedAt: registryRebuild.AttemptedAt,
 			Generation:  registryRebuild.Generation,
@@ -449,7 +434,7 @@ func DeleteTaskPluginVersion(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err = syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+	if err = service.SyncTaskPluginsOnceContext(c.Request.Context()); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -490,7 +475,7 @@ func ActivateTaskPlugin(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err = syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+	if err = service.SyncTaskPluginsOnceContext(c.Request.Context()); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -592,7 +577,7 @@ func SetTaskPluginStatus(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err := syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+	if err := service.SyncTaskPluginsOnceContext(c.Request.Context()); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -700,173 +685,4 @@ func GetTaskPluginOptions(c *gin.Context) {
 		return options[i]["key"].(string) < options[j]["key"].(string)
 	})
 	common.ApiSuccess(c, options)
-}
-
-var taskPluginSyncState = struct {
-	sync.Mutex
-	hashes      map[string]string
-	errors      map[string]string
-	lastRebuild taskPluginRebuildOutcome
-}{hashes: map[string]string{}, errors: map[string]string{}}
-
-func syncTaskPluginsOnce() error {
-	return syncTaskPluginsOnceContext(context.Background())
-}
-
-func syncTaskPluginsOnceContext(ctx context.Context) error {
-	started := time.Now()
-	taskPluginSyncState.Lock()
-	defer taskPluginSyncState.Unlock()
-	databaseSnapshot, err := model.GetTaskPluginSyncSnapshot()
-	if err != nil {
-		syncErr := fmt.Errorf("sync task plugins: %w", err)
-		taskPluginSyncState.lastRebuild = taskPluginRebuildOutcome{
-			Status:           "failed",
-			AttemptedAt:      time.Now(),
-			Generation:       jsplugin.DefaultRegistry.Generation().Number,
-			DatabaseRevision: taskPluginSyncState.lastRebuild.DatabaseRevision,
-			Error:            syncErr.Error(),
-		}
-		logger.LogDebug(
-			ctx,
-			"task_plugin subsystem=sync event=failed stage=database_snapshot retained_generation=%d elapsed_ms=%d",
-			jsplugin.DefaultRegistry.Generation().Number,
-			time.Since(started).Milliseconds(),
-		)
-		return syncErr
-	}
-	databasePlugins := databaseSnapshot.Plugins
-	sort.Slice(databasePlugins, func(i, j int) bool { return databasePlugins[i].Key < databasePlugins[j].Key })
-	currentOverrides := jsplugin.DefaultRegistry.OverridePlugins()
-	generationBefore := jsplugin.DefaultRegistry.Generation().Number
-	logger.LogDebug(
-		ctx,
-		"task_plugin subsystem=sync event=start database_revision=%q generation=%d desired_plugins=%d current_overrides=%d",
-		databaseSnapshot.Revision,
-		generationBefore,
-		len(databasePlugins),
-		len(currentOverrides),
-	)
-	nextOverrides := make([]*jsplugin.LoadedPlugin, 0, len(databasePlugins))
-	nextHashes := make(map[string]string, len(databasePlugins))
-	seen := make(map[string]bool, len(databasePlugins))
-	for _, plugin := range databasePlugins {
-		seen[plugin.Key] = true
-		if current := currentOverrides[plugin.Key]; current != nil && taskPluginSyncState.hashes[plugin.Key] == plugin.SourceHash {
-			nextOverrides = append(nextOverrides, current)
-			nextHashes[plugin.Key] = plugin.SourceHash
-			logger.LogDebug(
-				ctx,
-				"task_plugin subsystem=sync event=plugin plugin=%q version=%q action=reuse",
-				plugin.Key,
-				plugin.Version,
-			)
-			continue
-		}
-		logger.LogDebug(
-			ctx,
-			"task_plugin subsystem=sync event=plugin plugin=%q version=%q action=compile_start",
-			plugin.Key,
-			plugin.Version,
-		)
-		var compiled *jsplugin.LoadedPlugin
-		source, compileErr := model.GetTaskPluginSource(plugin.Id)
-		if compileErr != nil {
-			compileErr = fmt.Errorf("load source: %w", compileErr)
-		} else {
-			compiled, compileErr = jsplugin.CompilePlugin(string(source), jsplugin.Options{Key: plugin.Key, Version: plugin.Version})
-		}
-		if compileErr != nil {
-			retainedIncumbent := false
-			if current := currentOverrides[plugin.Key]; current != nil {
-				nextOverrides = append(nextOverrides, current)
-				retainedIncumbent = true
-				if currentHash := taskPluginSyncState.hashes[plugin.Key]; currentHash != "" {
-					nextHashes[plugin.Key] = currentHash
-				}
-			}
-			taskPluginSyncState.errors[plugin.Key] = compileErr.Error()
-			common.SysError(common.LogText("compile task plugin %s@%s: %v", plugin.Key, plugin.Version, compileErr))
-			logger.LogDebug(
-				ctx,
-				"task_plugin subsystem=sync event=plugin plugin=%q version=%q action=compile_failed retained_incumbent=%t",
-				plugin.Key,
-				plugin.Version,
-				retainedIncumbent,
-			)
-			continue
-		}
-		nextOverrides = append(nextOverrides, compiled)
-		nextHashes[plugin.Key] = plugin.SourceHash
-		delete(taskPluginSyncState.errors, plugin.Key)
-		logger.LogDebug(
-			ctx,
-			"task_plugin subsystem=sync event=plugin plugin=%q version=%q action=compile_success",
-			plugin.Key,
-			plugin.Version,
-		)
-	}
-	if err = jsplugin.DefaultRegistry.ReplaceOverrides(nextOverrides); err != nil {
-		syncErr := fmt.Errorf("publish task plugin generation: %w", err)
-		taskPluginSyncState.lastRebuild = taskPluginRebuildOutcome{
-			Status:           "failed",
-			AttemptedAt:      time.Now(),
-			Generation:       jsplugin.DefaultRegistry.Generation().Number,
-			DatabaseRevision: databaseSnapshot.Revision,
-			Error:            syncErr.Error(),
-		}
-		logger.LogDebug(
-			ctx,
-			"task_plugin subsystem=sync event=failed stage=publish retained_generation=%d retained_generation_active=true database_revision=%q elapsed_ms=%d",
-			jsplugin.DefaultRegistry.Generation().Number,
-			databaseSnapshot.Revision,
-			time.Since(started).Milliseconds(),
-		)
-		return syncErr
-	}
-	taskPluginSyncState.hashes = nextHashes
-	for key := range taskPluginSyncState.errors {
-		if !seen[key] {
-			delete(taskPluginSyncState.errors, key)
-		}
-	}
-	pluginErrors := jsplugin.DefaultRegistry.RoutingErrors()
-	maps.Copy(pluginErrors, taskPluginSyncState.errors)
-	pluginErrorCount := len(pluginErrors)
-	status := "success"
-	if pluginErrorCount > 0 {
-		status = "partial"
-	}
-	taskPluginSyncState.lastRebuild = taskPluginRebuildOutcome{
-		Status:           status,
-		AttemptedAt:      time.Now(),
-		Generation:       jsplugin.DefaultRegistry.Generation().Number,
-		DatabaseRevision: databaseSnapshot.Revision,
-		PluginErrorCount: pluginErrorCount,
-	}
-	logger.LogDebug(
-		ctx,
-		"task_plugin subsystem=sync event=complete database_revision=%q previous_generation=%d generation=%d status=%q active_overrides=%d plugin_errors=%d elapsed_ms=%d",
-		databaseSnapshot.Revision,
-		generationBefore,
-		jsplugin.DefaultRegistry.Generation().Number,
-		status,
-		len(jsplugin.DefaultRegistry.ActiveOverridePlugins()),
-		pluginErrorCount,
-		time.Since(started).Milliseconds(),
-	)
-	return nil
-}
-
-func SyncTaskPluginsOnce() {
-	if err := syncTaskPluginsOnce(); err != nil {
-		common.SysError(err.Error())
-	}
-}
-
-func SyncTaskPlugins() {
-	SyncTaskPluginsOnce()
-	for range time.NewTicker(30 * time.Second).C {
-		SyncTaskPluginsOnce()
-	}
 }

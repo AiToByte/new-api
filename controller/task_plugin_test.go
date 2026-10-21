@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -66,10 +67,7 @@ func cleanupTaskPluginControllerRuntime(t *testing.T, key string) {
 	t.Helper()
 	t.Cleanup(func() {
 		jsplugin.DefaultRegistry.Unregister(key)
-		taskPluginSyncState.Lock()
-		delete(taskPluginSyncState.hashes, key)
-		delete(taskPluginSyncState.errors, key)
-		taskPluginSyncState.Unlock()
+		service.TaskPluginSyncForget(key)
 	})
 }
 
@@ -274,7 +272,7 @@ func TestDisableFactoryOverrideRowSuppressesBothLayers(t *testing.T) {
 		Source: model.LongText(overrideSource), SourceHash: "test-hash", Enabled: true,
 	}
 	require.NoError(t, model.SaveTaskPlugin(&plugin))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 
 	recorder := postTaskPluginStatus(t, "kling", "", `{"enabled":false}`)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
@@ -546,10 +544,7 @@ func TestDeleteActiveTaskPluginPromotesEnabledVersionInRuntime(t *testing.T) {
 	}))
 	_, err := jsplugin.DefaultRegistry.Register(v1Source, jsplugin.Options{Key: key, Version: "1.0.0"})
 	require.NoError(t, err)
-	taskPluginSyncState.Lock()
-	taskPluginSyncState.hashes[key] = "hash-v1"
-	taskPluginSyncState.errors[key] = "stale compile error"
-	taskPluginSyncState.Unlock()
+	service.TaskPluginSyncRemember(key, "hash-v1", "stale compile error")
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
@@ -564,10 +559,7 @@ func TestDeleteActiveTaskPluginPromotesEnabledVersionInRuntime(t *testing.T) {
 	runtimePlugin, ok := jsplugin.DefaultRegistry.Get(key)
 	require.True(t, ok)
 	assert.Equal(t, "2.0.0", runtimePlugin.Meta.Version)
-	taskPluginSyncState.Lock()
-	syncedHash := taskPluginSyncState.hashes[key]
-	_, hasSyncError := taskPluginSyncState.errors[key]
-	taskPluginSyncState.Unlock()
+	syncedHash, hasSyncError := service.TaskPluginSyncTracker(key)
 	assert.Equal(t, "hash-v2", syncedHash)
 	assert.False(t, hasSyncError)
 }
@@ -577,10 +569,7 @@ func TestUploadTaskPluginRefreshesRuntimeSyncState(t *testing.T) {
 	key := "upload-sync-probe"
 	cleanupTaskPluginControllerRuntime(t, key)
 	source := taskPluginControllerTestSource(key, "1.0.0")
-	taskPluginSyncState.Lock()
-	taskPluginSyncState.hashes[key] = "stale-hash"
-	taskPluginSyncState.errors[key] = "stale compile error"
-	taskPluginSyncState.Unlock()
+	service.TaskPluginSyncRemember(key, "stale-hash", "stale compile error")
 	body, err := common.Marshal(map[string]any{"source": source})
 	require.NoError(t, err)
 
@@ -593,10 +582,7 @@ func TestUploadTaskPluginRefreshesRuntimeSyncState(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 	stored, err := model.GetTaskPluginVersion(key, "")
 	require.NoError(t, err)
-	taskPluginSyncState.Lock()
-	syncedHash := taskPluginSyncState.hashes[key]
-	_, hasSyncError := taskPluginSyncState.errors[key]
-	taskPluginSyncState.Unlock()
+	syncedHash, hasSyncError := service.TaskPluginSyncTracker(key)
 	assert.Equal(t, stored.SourceHash, syncedHash)
 	assert.False(t, hasSyncError)
 }
@@ -615,10 +601,7 @@ func TestActivateTaskPluginRefreshesRuntimeSyncState(t *testing.T) {
 	}))
 	_, err := jsplugin.DefaultRegistry.Register(v1Source, jsplugin.Options{Key: key, Version: "1.0.0"})
 	require.NoError(t, err)
-	taskPluginSyncState.Lock()
-	taskPluginSyncState.hashes[key] = "hash-v1"
-	taskPluginSyncState.errors[key] = "stale compile error"
-	taskPluginSyncState.Unlock()
+	service.TaskPluginSyncRemember(key, "hash-v1", "stale compile error")
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
@@ -631,10 +614,7 @@ func TestActivateTaskPluginRefreshesRuntimeSyncState(t *testing.T) {
 	runtimePlugin, ok := jsplugin.DefaultRegistry.Get(key)
 	require.True(t, ok)
 	assert.Equal(t, "2.0.0", runtimePlugin.Meta.Version)
-	taskPluginSyncState.Lock()
-	syncedHash := taskPluginSyncState.hashes[key]
-	_, hasSyncError := taskPluginSyncState.errors[key]
-	taskPluginSyncState.Unlock()
+	syncedHash, hasSyncError := service.TaskPluginSyncTracker(key)
 	assert.Equal(t, "hash-v2", syncedHash)
 	assert.False(t, hasSyncError)
 }
@@ -655,7 +635,7 @@ func TestSyncTaskPluginsPublishesOneGenerationForWholeBatch(t *testing.T) {
 	}))
 	before := jsplugin.DefaultRegistry.Generation().Number
 
-	SyncTaskPluginsOnce()
+	service.SyncTaskPluginsOnce()
 
 	assert.Equal(t, before+1, jsplugin.DefaultRegistry.Generation().Number)
 	_, firstRegistered := jsplugin.DefaultRegistry.Get(firstKey)
@@ -664,7 +644,7 @@ func TestSyncTaskPluginsPublishesOneGenerationForWholeBatch(t *testing.T) {
 	assert.True(t, secondRegistered)
 
 	published := jsplugin.DefaultRegistry.Generation()
-	SyncTaskPluginsOnce()
+	service.SyncTaskPluginsOnce()
 	assert.Same(t, published, jsplugin.DefaultRegistry.Generation())
 }
 
@@ -672,13 +652,9 @@ func TestTaskPluginRuntimeExposesDatabaseRevisionAheadOfLocalGeneration(t *testi
 	setupTaskPluginControllerTest(t)
 	key := "runtime-revision-probe"
 	cleanupTaskPluginControllerRuntime(t, key)
-	taskPluginSyncState.Lock()
-	previousRebuild := taskPluginSyncState.lastRebuild
-	taskPluginSyncState.Unlock()
+	previousRebuild := service.TaskPluginSyncLastRebuild()
 	t.Cleanup(func() {
-		taskPluginSyncState.Lock()
-		taskPluginSyncState.lastRebuild = previousRebuild
-		taskPluginSyncState.Unlock()
+		service.TaskPluginSyncSetLastRebuild(previousRebuild)
 	})
 
 	v1Source := taskPluginControllerTestSource(key, "1.0.0")
@@ -686,11 +662,9 @@ func TestTaskPluginRuntimeExposesDatabaseRevisionAheadOfLocalGeneration(t *testi
 		Key: key, APIVersion: 1, Version: "1.0.0",
 		Source: model.LongText(v1Source), SourceHash: "runtime-v1", Enabled: true,
 	}))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 	localGeneration := jsplugin.DefaultRegistry.Generation().Number
-	taskPluginSyncState.Lock()
-	syncedRevision := taskPluginSyncState.lastRebuild.DatabaseRevision
-	taskPluginSyncState.Unlock()
+	syncedRevision := service.TaskPluginSyncLastRebuild().DatabaseRevision
 
 	v2Source := taskPluginControllerTestSource(key, "2.0.0")
 	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
@@ -726,19 +700,15 @@ func TestTaskPluginRuntimeReportsPluginLevelCompileErrors(t *testing.T) {
 	setupTaskPluginControllerTest(t)
 	key := "runtime-error-probe"
 	cleanupTaskPluginControllerRuntime(t, key)
-	taskPluginSyncState.Lock()
-	previousRebuild := taskPluginSyncState.lastRebuild
-	taskPluginSyncState.Unlock()
+	previousRebuild := service.TaskPluginSyncLastRebuild()
 	t.Cleanup(func() {
-		taskPluginSyncState.Lock()
-		taskPluginSyncState.lastRebuild = previousRebuild
-		taskPluginSyncState.Unlock()
+		service.TaskPluginSyncSetLastRebuild(previousRebuild)
 	})
 	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
 		Key: key, APIVersion: 1, Version: "1.0.0",
 		Source: "export const meta = {", SourceHash: "broken-source", Enabled: true,
 	}))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
@@ -763,13 +733,9 @@ func TestTaskPluginRuntimeSurvivesDatabaseSyncFailure(t *testing.T) {
 	setupTaskPluginControllerTest(t)
 	key := "runtime-database-failure"
 	cleanupTaskPluginControllerRuntime(t, key)
-	taskPluginSyncState.Lock()
-	previousRebuild := taskPluginSyncState.lastRebuild
-	taskPluginSyncState.Unlock()
+	previousRebuild := service.TaskPluginSyncLastRebuild()
 	t.Cleanup(func() {
-		taskPluginSyncState.Lock()
-		taskPluginSyncState.lastRebuild = previousRebuild
-		taskPluginSyncState.Unlock()
+		service.TaskPluginSyncSetLastRebuild(previousRebuild)
 	})
 
 	source := taskPluginControllerTestSource(key, "1.0.0")
@@ -777,16 +743,14 @@ func TestTaskPluginRuntimeSurvivesDatabaseSyncFailure(t *testing.T) {
 		Key: key, APIVersion: 1, Version: "1.0.0",
 		Source: model.LongText(source), SourceHash: "runtime-database-v1", Enabled: true,
 	}))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 	generation := jsplugin.DefaultRegistry.Generation().Number
-	taskPluginSyncState.Lock()
-	syncedRevision := taskPluginSyncState.lastRebuild.DatabaseRevision
-	taskPluginSyncState.Unlock()
+	syncedRevision := service.TaskPluginSyncLastRebuild().DatabaseRevision
 
 	sqlDatabase, err := model.DB.DB()
 	require.NoError(t, err)
 	require.NoError(t, sqlDatabase.Close())
-	require.Error(t, syncTaskPluginsOnce())
+	require.Error(t, service.SyncTaskPluginsOnce())
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
@@ -822,7 +786,7 @@ func TestSyncTaskPluginsCachesRejectedDesiredSourceWithoutLosingIncumbent(t *tes
 	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{
 		Key: ownerKey, APIVersion: 1, Version: "1.0.0", Source: model.LongText(ownerSource), SourceHash: "owner-v1", Enabled: true,
 	}))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 
 	incumbent, ok := jsplugin.DefaultRegistry.Get(pluginKey)
 	require.True(t, ok)
@@ -831,19 +795,18 @@ func TestSyncTaskPluginsCachesRejectedDesiredSourceWithoutLosingIncumbent(t *tes
 	}))
 	require.NoError(t, model.ActivateTaskPlugin(pluginKey, "2.0.0"))
 
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 	rejectedGeneration := jsplugin.DefaultRegistry.Generation()
 	for range 2 {
-		require.NoError(t, syncTaskPluginsOnce())
+		require.NoError(t, service.SyncTaskPluginsOnce())
 		active, found := jsplugin.DefaultRegistry.Get(pluginKey)
 		require.True(t, found)
 		assert.Same(t, incumbent, active)
 		assert.Equal(t, "2.0.0", jsplugin.DefaultRegistry.OverridePlugins()[pluginKey].Meta.Version)
 		assert.Same(t, incumbent, jsplugin.DefaultRegistry.ActiveOverridePlugins()[pluginKey])
 		assert.Contains(t, jsplugin.DefaultRegistry.RoutingErrors()[pluginKey], "channelType 9002 conflicts")
-		taskPluginSyncState.Lock()
-		assert.Equal(t, "retained-v2", taskPluginSyncState.hashes[pluginKey])
-		taskPluginSyncState.Unlock()
+		syncedHash, _ := service.TaskPluginSyncTracker(pluginKey)
+		assert.Equal(t, "retained-v2", syncedHash)
 		assert.Same(t, rejectedGeneration, jsplugin.DefaultRegistry.Generation())
 	}
 
@@ -852,7 +815,7 @@ func TestSyncTaskPluginsCachesRejectedDesiredSourceWithoutLosingIncumbent(t *tes
 		Source: model.LongText(taskPluginControllerChannelSource(ownerKey, "2.0.0", 9003)), SourceHash: "owner-v2", Enabled: true,
 	}))
 	require.NoError(t, model.ActivateTaskPlugin(ownerKey, "2.0.0"))
-	require.NoError(t, syncTaskPluginsOnce())
+	require.NoError(t, service.SyncTaskPluginsOnce())
 	active, ok := jsplugin.DefaultRegistry.Get(pluginKey)
 	require.True(t, ok)
 	assert.Equal(t, "2.0.0", active.Meta.Version)
