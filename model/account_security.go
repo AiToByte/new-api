@@ -131,6 +131,15 @@ func UpdateUserBindColumnForSessionWithTx(tx *gorm.DB, identity AuthSessionIdent
 	return tx.Model(&User{}).Where("id = ?", identity.UserID).Update(column, value).Error
 }
 
+// UpdateUserBindColumnForSession atomically validates the session and stamps
+// the chosen binding column. The transaction is owned here so callers never
+// touch model.DB directly (Phase 3.2 layering).
+func UpdateUserBindColumnForSession(identity AuthSessionIdentity, column, value string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return UpdateUserBindColumnForSessionWithTx(tx, identity, column, value)
+	})
+}
+
 func UpdateUserOAuthBindingForSessionWithTx(tx *gorm.DB, identity AuthSessionIdentity, providerID int, subject string) error {
 	if providerID <= 0 || subject == "" || len(subject) > 256 {
 		return ErrAccountBindingChanged
@@ -170,4 +179,19 @@ func MigrateLegacyGitHubBindingWithTx(tx *gorm.DB, userID int, legacyID, gitHubI
 		return false, result.Error
 	}
 	return result.RowsAffected == 1, nil
+}
+
+// MigrateLegacyGitHubBinding atomically rewrites a login-name GitHub binding
+// onto the given user. The transaction is owned here so callers never touch
+// model.DB directly (Phase 3.2 layering).
+func MigrateLegacyGitHubBinding(userID int, legacyID, gitHubID string) (bool, error) {
+	var written bool
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		written, err = MigrateLegacyGitHubBindingWithTx(tx, userID, legacyID, gitHubID)
+		return err
+	}); err != nil {
+		return false, err
+	}
+	return written, nil
 }

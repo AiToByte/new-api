@@ -60,14 +60,11 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 		}
 	}
 
-	var rootUser model.User
-	if err := model.DB.Select("id").Where("role = ?", common.RoleRootUser).First(&rootUser).Error; err != nil {
+	rootUserID, err := model.GetRootUserID()
+	if err != nil {
 		return 0, fmt.Errorf("failed to resolve channel test user: %w", err)
 	}
-	if rootUser.Id == 0 {
-		return 0, errors.New("failed to resolve channel test user")
-	}
-	return rootUser.Id, nil
+	return rootUserID, nil
 }
 
 func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {

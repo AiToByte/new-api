@@ -719,6 +719,37 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	})
 }
 
+// CreateOAuthUserWithProviderUpdate creates a new user inside a transaction,
+// stamps the provider id column via stamp (e.g. the provider's
+// SetProviderUserID), and persists all provider id columns before committing.
+// The transaction and the column map live here so callers never touch model.DB
+// directly (Phase 3.2 layering).
+func CreateOAuthUserWithProviderUpdate(user *User, inviterId int, stamp func(user *User)) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := user.InsertWithTx(tx, inviterId); err != nil {
+			return err
+		}
+		if stamp != nil {
+			stamp(user)
+		}
+		return tx.Model(user).Updates(providerIDColumns(user)).Error
+	})
+}
+
+// providerIDColumns returns the OAuth provider id columns of a user. Built-in
+// providers overwrite exactly one of these; the remainder are persisted as the
+// values already on the struct, matching the historical full-map update.
+func providerIDColumns(user *User) map[string]any {
+	return map[string]any{
+		"github_id":   user.GitHubId,
+		"discord_id":  user.DiscordId,
+		"oidc_id":     user.OidcId,
+		"linux_do_id": user.LinuxDOId,
+		"wechat_id":   user.WeChatId,
+		"telegram_id": user.TelegramId,
+	}
+}
+
 // FinalizeOAuthUserCreation performs post-transaction tasks for OAuth user creation.
 // This should be called after the transaction commits successfully.
 func (user *User) FinalizeOAuthUserCreation(inviterId int) {
@@ -1392,6 +1423,28 @@ func DeltaUpdateUserQuota(id int, delta int) (err error) {
 func GetRootUser() (user *User) {
 	DB.Where("role = ?", common.RoleRootUser).First(&user)
 	return user
+}
+
+// GetRootUserID returns the id of the root user. The query mirrors the
+// id-only projection callers used inline so they never touch model.DB
+// directly (Phase 3.2 layering).
+func GetRootUserID() (int, error) {
+	var rootUser User
+	if err := DB.Select("id").Where("role = ?", common.RoleRootUser).First(&rootUser).Error; err != nil {
+		return 0, err
+	}
+	if rootUser.Id == 0 {
+		return 0, errors.New("root user not found")
+	}
+	return rootUser.Id, nil
+}
+
+// CreateSetupRootUser persists the initial root account created by the setup
+// wizard. It performs a bare insert: the wizard drives quota, options and the
+// Setup record separately, so no invite/sidebar bootstrap runs here. Callers
+// never touch model.DB directly (Phase 3.2 layering).
+func CreateSetupRootUser(user *User) error {
+	return DB.Create(user).Error
 }
 
 func UpdateUserLastLoginAt(id int) {

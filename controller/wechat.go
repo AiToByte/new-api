@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type wechatLoginResponse struct {
@@ -145,9 +144,7 @@ func WeChatBind(c *gin.Context) {
 		return
 	}
 	// 只更新绑定列，避免完整用户快照覆盖并发的封禁、降权或分组变更。
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		return model.UpdateUserBindColumnForSessionWithTx(tx, identity, "wechat_id", wechatId)
-	}); err != nil {
+	if err := model.UpdateUserBindColumnForSession(identity, "wechat_id", wechatId); err != nil {
 		writeSecurityOperationError(c, err)
 		return
 	}

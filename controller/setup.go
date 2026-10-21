@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"time"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -96,7 +94,7 @@ func PostSetup(c *gin.Context) {
 			AccessToken: nil,
 			Quota:       100000000,
 		}
-		err = model.DB.Create(&rootUser).Error
+		err = model.CreateSetupRootUser(&rootUser)
 		if err != nil {
 			common.ApiErrorT(c, "Failed to create the administrator account: {{error}}", map[string]any{"error": err.Error()})
 			return
@@ -123,11 +121,7 @@ func PostSetup(c *gin.Context) {
 	// Update setup status
 	constant.Setup = true
 
-	setup := model.Setup{
-		Version:       common.Version,
-		InitializedAt: time.Now().Unix(),
-	}
-	err = model.DB.Create(&setup).Error
+	err = model.InitializeSetup()
 	if err != nil {
 		common.ApiErrorT(c, "Failed to initialize the system: {{error}}", map[string]any{"error": err.Error()})
 		return

@@ -104,6 +104,19 @@ func CreateUserOAuthBindingWithTx(tx *gorm.DB, binding *UserOAuthBinding) error 
 	return tx.Create(binding).Error
 }
 
+// CreateOAuthUserWithBinding atomically creates a new user together with its
+// OAuth provider binding. The transaction is owned here so callers never touch
+// model.DB directly (Phase 3.2 layering). Post-creation tasks (sidebar config,
+// logs, inviter rewards) stay the caller's responsibility once committed.
+func CreateOAuthUserWithBinding(user *User, inviterId int, binding *UserOAuthBinding) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := user.InsertWithTx(tx, inviterId); err != nil {
+			return err
+		}
+		return CreateUserOAuthBindingWithTx(tx, binding)
+	})
+}
+
 // UpdateUserOAuthBinding updates an existing OAuth binding (e.g., rebind to different OAuth account)
 func UpdateUserOAuthBinding(userId, providerId int, newProviderUserId string) error {
 	// Check if the new provider user ID is already taken by another user

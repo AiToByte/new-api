@@ -449,12 +449,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				recordLegacyGitHubBindingAudit(c, user, false, map[string]any{"legacy_id": legacyID, "provider_user_id": oauthUser.ProviderUserID, "reason": reason})
 				return nil, nil, &OAuthLegacyBindingNotConfirmedError{}
 			}
-			written := false
-			err = model.DB.Transaction(func(tx *gorm.DB) error {
-				var err error
-				written, err = model.MigrateLegacyGitHubBindingWithTx(tx, user.Id, legacyID, oauthUser.ProviderUserID)
-				return err
-			})
+			written, err := model.MigrateLegacyGitHubBinding(user.Id, legacyID, oauthUser.ProviderUserID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -515,25 +510,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	// Use transaction to ensure user creation and OAuth binding are atomic
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
 		// Custom provider: create user and binding in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Create OAuth binding
-			binding := &model.UserOAuthBinding{
-				UserId:         user.Id,
-				ProviderId:     genericProvider.GetProviderId(),
-				ProviderUserId: oauthUser.ProviderUserID,
-			}
-			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
-				return err
-			}
-
-			return nil
-		})
-		if err != nil {
+		// Create user and OAuth binding atomically
+		binding := &model.UserOAuthBinding{
+			UserId:         user.Id,
+			ProviderId:     genericProvider.GetProviderId(),
+			ProviderUserId: oauthUser.ProviderUserID,
+		}
+		if err := model.CreateOAuthUserWithBinding(user, inviterId, binding); err != nil {
 			return nil, nil, err
 		}
 
@@ -541,28 +524,12 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		user.FinalizeOAuthUserCreation(inviterId)
 	} else {
 		// Built-in provider: create user and update provider ID in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Set the provider user ID on the user model and update
-			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
-			if err := tx.Model(user).Updates(map[string]any{
-				"github_id":   user.GitHubId,
-				"discord_id":  user.DiscordId,
-				"oidc_id":     user.OidcId,
-				"linux_do_id": user.LinuxDOId,
-				"wechat_id":   user.WeChatId,
-				"telegram_id": user.TelegramId,
-			}).Error; err != nil {
-				return err
-			}
-
-			return nil
-		})
-		if err != nil {
+		// Create user, stamp the provider id, and persist it atomically. The
+		// provider id columns are written inside the same transaction that
+		// inserts the user, matching the historical step order.
+		if err := model.CreateOAuthUserWithProviderUpdate(user, inviterId, func(u *model.User) {
+			provider.SetProviderUserID(u, oauthUser.ProviderUserID)
+		}); err != nil {
 			return nil, nil, err
 		}
 
