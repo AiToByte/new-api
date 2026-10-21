@@ -392,7 +392,9 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 保真手法沉淀：① 事务闭包内只有一句 model 调用 → model 包一层非 Tx 函数；② 「事务内需按 controller 上下文分派」→ 传参（operatorRole）或回调（stamp），把分派逻辑移进事务所有者；③ 顺序敏感步骤（insert 后才 set provider id）→ 用回调保持原顺序；④ 查询列投影/`Unscoped` 等语义 → model 函数逐字复刻。
 - 验收口径二（「不 import service 的 40 文件 → 个位数」）独立：79 个生产 controller 文件中 43 个 import service、36 个不 import。剩余 36 个中相当比例本就是薄控制器（audit/captcha/log/system_info 等无业务逻辑），需按域评估后单独推进，不宜机械凑数。
 - 口径二首批落地（2026-10-21，`76ece2320`）：`ratio_sync.go` 整条「上游倍率同步管道」下沉——并发抓取 + 四种 wire 格式解析（ratio_config / pricing / OpenRouter / models.dev）+ 归一化 + diff，全部移入 `service/ratio_sync.go`（service 导出 `DefaultEndpoint`/`DefaultTimeoutSeconds`/`ValueMap`/`BuildDifferences`/`FetchUpstreamRatios`/`ListSyncableChannels`）；controller 从 1145 行瘦到 108 行（只做绑定/上游解析/渲染）。纯函数测试 `TestPricingSyncExpressionPriority` 随之移入 service 包，controller 保留两个 HTTP handler 测试。口径二计数 36 → **35**。
-- 口径二下一候选（已只读分析）：`task_plugin.go`（872 行，14 handler + 1 个 145 行后台同步函数）。其中 `syncTaskPluginsOnceContext` 与 controller 包的 `taskPluginSyncState`（互斥状态 + lastRebuild/hashes/errors）耦合，搬迁需连状态一起移入 service 并让 handler 经 service 读取，属中等规模重构；`SetTaskPluginStatus`（~97 行）handler 内亦含可下沉的状态机逻辑。
+- 口径二第二弹（2026-10-21，`0d756cb2d`）：`task_plugin.go` 的同步状态机下沉——controller 包的 `taskPluginSyncState`（互斥状态：hashes/errors/lastRebuild）+ 145 行同步 pass + 周期循环整体移入 `service/task_plugin_sync.go`；新增 tracker/read API（`TaskPluginSyncPluginErrors`/`LastRebuild`/`SetLastRebuild`/`Remember`/`Tracker`/`Forget`），handler 与测试均经 API 访问，不再摸 controller 包级互斥量；`main.go` 改调 `service.SyncTaskPlugins()`。controller 872 → 688 行。口径二计数 35 → **34**。
+- 口径二经验：① 跨包匿名结构体提升为命名类型（ratio_sync 的 `UpstreamSource`）；② 「测试需要 seed/readback 的内部状态」用一组命名清晰的 tracker API 暴露，而非测试特判；③ sed 区段提取 + 机械替换（`c.Request.Context()`→ctx 等）显著降低大块搬迁的转录风险。
+- 口径二下一候选（已只读分析）：`deployment.go`（807 行）与 `SetTaskPluginStatus`（task_plugin.go 内 ~97 行 handler，含可下沉的状态机）；`performance.go`（371 行）、`audit.go`（224 行）、`redemption.go`（223 行）随后评估。
 
 ### 8.3 验证
 
