@@ -393,4 +393,6 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 每提交 `gofmt -l` 无输出、`go build`/`go vet ./controller/ ./model/ ./service/` 零告警。
 - 子集回归（三方言矩阵，DSN 缺省走 sqlite 分支）：metadata `TestModelManagementDatabaseMatrix|TestMetadataSync…|TestModelDeletion…` 14.8s✅；channel `Upstream|AdvancedCustom` 7.5s✅；`Channel|Codex` 22.3s✅；`Plugin|Subscription` 8.1s✅。
 - layering 扫描（`rg 'model\.(DB|LOG_DB)|\.Transaction\(' controller/ --glob '!*_test.go'`）逐提交复核，移除项逐条确认。
+- **全量 controller 回归（回填 2026-10-21）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN（mysql 8.4.11 @127.0.0.1:13306 / pg 15.18 @127.0.0.1:15432，凭据取自 `newapi-test-*` 容器）—— **1179.155s 全绿、零失败（EXIT=0）**。三方言实证执行：`TestModelManagementDatabaseMatrix` 的 sqlite/mysql/postgres 三分支各自建隔离库并 PASS（`isolated database: newapi_audit_* (mysql|postgres)`）。结论与 3.2 既有记录闭环——单包串行此前唯一失败即 `TestDeleteRedemptionBatch`，`bf3784977` 修复后全量归零。
+- 注：三方言矩阵由 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN` 环境变量驱动，**未设置时 mysql/postgres 子测试静默 skip**；此前若干“子集通过”实为仅 sqlite 执行，全量口径须显式带 DSN。
 - 全 controller 全量仍受 Windows SQLite 文件锁/多 DB 池影响，看门禁以 CI（Linux）为准（同 3.3 既有结论）。
