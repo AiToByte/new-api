@@ -271,7 +271,7 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 | Phase 0 地基 | 4 | 0.1✅；0.2 门禁子集✅；0.3✅（前端 65MB/入口 5MB/后端 154MB；延迟待 staging 回填）；0.4✅（2 黄金测试 + `TestSendUpstreamPolicies`） | ✅ 完成 |
 | Phase 1 relay 核心 | 6 | 1.1✅（BaseAdaptor，101 桩删除）；1.2✅；1.3✅（SendUpstream，9 文件 10 站点；image/websocket 除外）；1.4✅（SettleUsage，3 判定点；9 直调点有意不动）；1.5✅（override 4 文件）；1.6✅（task_info/body_fields） | ✅ 完成 |
 | Phase 2 计费结算 | 4 | 2.1✅（usedVars 收敛+文档化分歧）；2.2✅（实证无代码）；2.3✅（LRU）；2.4✅（评估不搬） | ✅ 完成 |
-| Phase 3 越层治理 | 6 | 3.1✅（CI 门禁）；3.2 slice-1✅（subscription 写路径）/slice-2✅（channel 查询构造）；3.3✅；3.4✅；3.5✅；3.6 部分✅（hasEnabledMultiKey、processChannelError；SearchChannels 内存分页需过滤下沉设计，延期） | 进行中（controller 直接 `model.DB` 引用 12→5 生产文件；见 §八） |
+| Phase 3 越层治理 | 6 | 3.1✅（CI 门禁）；3.2 slice-1✅（subscription 写路径）/slice-2✅（channel 查询构造）+ §八批次✅（controller 直接 `model.DB` 引用 12→0，口径一达成）；3.3✅；3.4✅；3.5✅；3.6 部分✅（hasEnabledMultiKey、processChannelError；SearchChannels 内存分页需过滤下沉设计，延期） | 进行中（口径二「不 import service」40→36，余下多为薄控制器，按域推进） |
 | Phase 4 前端 | 7 | 4.1✅（删 7 死组件+去 2 依赖、knip 去盲区、13 重复头清零）；4.2✅（section registry lazy + 22 路由收敛）；4.5✅（163→18 内联 query key） | 进行中（4.3/4.4/4.6/4.7 未动） |
 | Phase 5 全局状态 | 5 | 0 | 未开始 |
 
@@ -381,17 +381,20 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 | `c73514fcf` | channel 数据访问 | `model.UpdateChannelKey`/`GetDisabledChannelIDs`；`codex_usage.go`/`channel.go` 改道 |
 | `89c96a91b` | 任务 | `(*model.Task).UpdatePrivateData` 方法；`plugin_protocol.go` 背景标志写改道（台账点名的 367 行） |
 | `fda022900` | 订阅计划 | `model.ListSubscriptionPlans`/`ListEnabledSubscriptionPlans` + service 包装；`subscription.go` 两个列表读改道 |
+| `c02d0e493` | oauth / wechat / channel-test / setup | `model.MigrateLegacyGitHubBinding`、`model.CreateOAuthUserWithBinding`、`model.CreateOAuthUserWithProviderUpdate`（stamp 回调保真「insert→设 provider id→同事务更新」原顺序，provider id 列 map 收进 model）；`model.UpdateUserBindColumnForSession`；`model.GetRootUserID`；`model.CreateSetupRootUser`（裸 insert 保真）+ `model.InitializeSetup` |
+| `230a6ee3b` | user 管理 | `model.GetUserByUsername`/`GetUserByIdUnscoped`；新 `service/user_admin.go`（`UpdateAdminUserWithPermissions`/`CreateAdminUserWithPermissions`/`DemoteUser`——事务横跨 user 表与授权矩阵故归 service；controller 本地 helper 的 root 判定改为 `operatorRole` 参数，gin 上下文不进事务 seam）；`user.go` 五处调用改道 |
 
 ### 8.2 进度
 
-- controller 生产文件直接 `model.DB`/`model.LOG_DB`/`.Transaction(` 引用：**12 → 5**（`channel-test.go`、`oauth.go`、`setup.go`、`user.go`、`wechat.go`）。
-- 剩余 5 文件均涉及事务或根账号创建：`oauth`/`wechat`/`user` 各有 `DB.Transaction`，`setup` 建 root user + Setup 记录，`channel-test.go` 做 root user 查找——需逐事务核对「哪些步骤必须同事务、哪些抽离后仍是原子」后再下沉，单列下一批。
-- 验收口径拆分：`model.DB` 直调归零按上面的 12→5 推进（可机械扫描复核）；「不 import service 的 40 文件 → 个位数」是独立口径，本次给 `model_meta.go`/`model_sync.go`/`subscription.go` 等补上 service 依赖，纯数据访问的单列下沉（codex key、task private_data）按既有 `model.DeleteDisabledChannel()` 惯例直连 model，不强制加 service 层。
+- controller 生产文件直接 `model.DB`/`model.LOG_DB`/`.Transaction(` 引用：**12 → 0** ✅（`rg 'model\.(DB|LOG_DB)|\.Transaction\(' controller/ --glob '!*_test.go'` 无输出）。Phase 3.2 验收口径一（「controller 中 model.DB 直调归零」）达成。
+- 下沉路径（按风险从低到高，每步原子提交）：纯数据访问单列 → model 函数（对齐既有 `model.DeleteDisabledChannel()` 惯例）；需补 service 依赖/未来横切面 → service seam（对齐 `service/subscription_plan.go`）；**事务横跨 model + service/authz → service 层拥有事务**（`service/user_admin.go`），controller 只传值 + 回调/参数，gin 上下文不进事务。
+- 保真手法沉淀：① 事务闭包内只有一句 model 调用 → model 包一层非 Tx 函数；② 「事务内需按 controller 上下文分派」→ 传参（operatorRole）或回调（stamp），把分派逻辑移进事务所有者；③ 顺序敏感步骤（insert 后才 set provider id）→ 用回调保持原顺序；④ 查询列投影/`Unscoped` 等语义 → model 函数逐字复刻。
+- 验收口径二（「不 import service 的 40 文件 → 个位数」）独立：79 个生产 controller 文件中 43 个 import service、36 个不 import。剩余 36 个中相当比例本就是薄控制器（audit/captcha/log/system_info 等无业务逻辑），需按域评估后单独推进，不宜机械凑数。
 
 ### 8.3 验证
 
 - 每提交 `gofmt -l` 无输出、`go build`/`go vet ./controller/ ./model/ ./service/` 零告警。
-- 子集回归（三方言矩阵，DSN 缺省走 sqlite 分支）：metadata `TestModelManagementDatabaseMatrix|TestMetadataSync…|TestModelDeletion…` 14.8s✅；channel `Upstream|AdvancedCustom` 7.5s✅；`Channel|Codex` 22.3s✅；`Plugin|Subscription` 8.1s✅。
+- 子集回归（三方言矩阵，DSN 缺省走 sqlite 分支；2026-10-21 起重跑均显式带 DSN 实证三方言）：metadata 14.8s✅；channel `Upstream|AdvancedCustom` 7.5s✅；`Channel|Codex` 22.3s✅；`Plugin|Subscription` 8.1s✅；`OAuth|GitHub|Legacy|Bind` 150.4s✅；`WeChat|Bind|Channel` 214.1s✅；`User|Manage|Register` 218.2s✅（零失败零跳过）。
 - layering 扫描（`rg 'model\.(DB|LOG_DB)|\.Transaction\(' controller/ --glob '!*_test.go'`）逐提交复核，移除项逐条确认。
 - **全量 controller 回归（回填 2026-10-21）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN（mysql 8.4.11 @127.0.0.1:13306 / pg 15.18 @127.0.0.1:15432，凭据取自 `newapi-test-*` 容器）—— **1179.155s 全绿、零失败（EXIT=0）**。三方言实证执行：`TestModelManagementDatabaseMatrix` 的 sqlite/mysql/postgres 三分支各自建隔离库并 PASS（`isolated database: newapi_audit_* (mysql|postgres)`）。结论与 3.2 既有记录闭环——单包串行此前唯一失败即 `TestDeleteRedemptionBatch`，`bf3784977` 修复后全量归零。
 - 注：三方言矩阵由 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN` 环境变量驱动，**未设置时 mysql/postgres 子测试静默 skip**；此前若干“子集通过”实为仅 sqlite 执行，全量口径须显式带 DSN。
