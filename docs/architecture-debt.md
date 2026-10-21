@@ -228,6 +228,7 @@ gin 1.9.1 与 Go 1.26 存在版本落差。**升级属独立提案**，须按 `A
 - [x] **3.4**（2026-10）：`UpdateSelf`（145 行）拆为路由内分派 + `UpdateSelfRequest` 类型化 DTO + 三个命名函数（`updateSelfPassword` / `updateSelfSetting` 闭包复用 / `updateSelfProfile`），消灭 map→marshal→unmarshal 回环。**有意不拆三个路由**：前端存在 profile+password 混合单请求（`acceptAuthRotation: Boolean(data.password)`），拆路由会逼出多调用+proof 杂耍并破坏第三方兼容；安全语义（step-up proof、session rotation）原位保留。已核对的边缘：`password:null/""` 视为未请求、`password:123` 解码 400（与旧 remarshal 失败同码）、null 设置键落 profile 空操作（struct-update 跳零值，无 wipe 风险）、超长 email/remark 不再 400（本就丢弃的字段）。新增 `controller/update_self_test.go` 分发表（5 用例）+ 既有 5 个安全测试断言全绿（仅 Windows 文件锁清理失败）。
 - [x] **3.5**（2026-10）：普查后采用**薄封装而非搬函数**——记账逻辑与事务同处 model 是良好内聚，真正要修的只是调用方向。新增 `service/payment_fulfillment.go`（6 个透传：4×Recharge + Purchase/Complete），7 文件 10 处 controller 调用改道；`TryReserveUserQuota/TokenQuota` 核实早已在 service 内部调用，无需动。合规：billing.md 已在 Phase 2 通读，本次只改调用路径、零算术变更；model 钱测试（exactly-once/redis-DB 对账/溢出上限等 10 项）全绿。
 - [ ] **3.6** 消除 D4 列出的两处真实重复规则
+  - SearchChannels 内存分页设计要点（2026-10-21 只读分析）：handler 两支数据源——tag 模式「按 tag 分批查库 + 按原 tag 序内存重组」与普通模式「`model.SearchChannels` 单次查库」——汇入同一套「status 过滤 → type 统计 → type 过滤 → 内存分页」。`model.SearchChannels` 不带 LIMIT（返回全量匹配集），故内存分页是对全量切片。三个过滤条件（status/type/分页）均为纯列谓词、可下沉 SQL，但 tag 模式的多源特性决定：要么先把两支统一为「取全量候选 → 统一过滤/分页」管道，要么接受 tag 支维持内存分页。属需专门设计的项，本批未擅动。
 
 **验收**：controller 中 `model.DB` 直调归零；不 import service 的文件 40 → 个位数。
 
@@ -398,4 +399,5 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - layering 扫描（`rg 'model\.(DB|LOG_DB)|\.Transaction\(' controller/ --glob '!*_test.go'`）逐提交复核，移除项逐条确认。
 - **全量 controller 回归（回填 2026-10-21）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN（mysql 8.4.11 @127.0.0.1:13306 / pg 15.18 @127.0.0.1:15432，凭据取自 `newapi-test-*` 容器）—— **1179.155s 全绿、零失败（EXIT=0）**。三方言实证执行：`TestModelManagementDatabaseMatrix` 的 sqlite/mysql/postgres 三分支各自建隔离库并 PASS（`isolated database: newapi_audit_* (mysql|postgres)`）。结论与 3.2 既有记录闭环——单包串行此前唯一失败即 `TestDeleteRedemptionBatch`，`bf3784977` 修复后全量归零。
 - 注：三方言矩阵由 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN` 环境变量驱动，**未设置时 mysql/postgres 子测试静默 skip**；此前若干“子集通过”实为仅 sqlite 执行，全量口径须显式带 DSN。
+- **下沉批次后终版全量回归（回填 2026-10-21 下午）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN —— **1289.631s 全绿、零失败（EXIT=0）**。覆盖本批全部下沉提交（oauth/wechat/channel-test/setup/user + 8 个业务域）。另跑 `./model/ ./service/ ./middleware/`（同为改动包）。
 - 全 controller 全量仍受 Windows SQLite 文件锁/多 DB 池影响，看门禁以 CI（Linux）为准（同 3.3 既有结论）。
