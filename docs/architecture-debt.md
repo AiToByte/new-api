@@ -393,8 +393,9 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 验收口径二（「不 import service 的 40 文件 → 个位数」）独立：79 个生产 controller 文件中 43 个 import service、36 个不 import。剩余 36 个中相当比例本就是薄控制器（audit/captcha/log/system_info 等无业务逻辑），需按域评估后单独推进，不宜机械凑数。
 - 口径二首批落地（2026-10-21，`76ece2320`）：`ratio_sync.go` 整条「上游倍率同步管道」下沉——并发抓取 + 四种 wire 格式解析（ratio_config / pricing / OpenRouter / models.dev）+ 归一化 + diff，全部移入 `service/ratio_sync.go`（service 导出 `DefaultEndpoint`/`DefaultTimeoutSeconds`/`ValueMap`/`BuildDifferences`/`FetchUpstreamRatios`/`ListSyncableChannels`）；controller 从 1145 行瘦到 108 行（只做绑定/上游解析/渲染）。纯函数测试 `TestPricingSyncExpressionPriority` 随之移入 service 包，controller 保留两个 HTTP handler 测试。口径二计数 36 → **35**。
 - 口径二第二弹（2026-10-21，`0d756cb2d`）：`task_plugin.go` 的同步状态机下沉——controller 包的 `taskPluginSyncState`（互斥状态：hashes/errors/lastRebuild）+ 145 行同步 pass + 周期循环整体移入 `service/task_plugin_sync.go`；新增 tracker/read API（`TaskPluginSyncPluginErrors`/`LastRebuild`/`SetLastRebuild`/`Remember`/`Tracker`/`Forget`），handler 与测试均经 API 访问，不再摸 controller 包级互斥量；`main.go` 改调 `service.SyncTaskPlugins()`。controller 872 → 688 行。口径二计数 35 → **34**。
-- 口径二经验：① 跨包匿名结构体提升为命名类型（ratio_sync 的 `UpstreamSource`）；② 「测试需要 seed/readback 的内部状态」用一组命名清晰的 tracker API 暴露，而非测试特判；③ sed 区段提取 + 机械替换（`c.Request.Context()`→ctx 等）显著降低大块搬迁的转录风险。
-- 口径二下一候选（已只读分析）：`deployment.go`（807 行）与 `SetTaskPluginStatus`（task_plugin.go 内 ~97 行 handler，含可下沉的状态机）；`performance.go`（371 行）、`audit.go`（224 行）、`redemption.go`（223 行）随后评估。
+- 口径二第三弹（2026-11-10，`8fcb614e3`）：`deployment.go`（io.net 模型部署薄代理，19 handler）下沉——`service/model_deployment.go` 接管 OptionMap 读取（`IoNetAPIKey`/`StoredIoNetAPIKey`/`ModelDeploymentSettings`）、API key 连通性校验（`ValidateIoNetAPIKey`，返回原始上游错误以保留 `ionet.APIError` 渲染）、以及两个纯投影/统计函数 `MapIoNetDeployment`/`ComputeDeploymentStatusCounts`；controller 807 → 718 行。口径二计数 34 → **33**。
+- 口径二经验：① 跨包匿名结构体提升为命名类型（ratio_sync 的 `UpstreamSource`）；② 「测试需要 seed/readback 的内部状态」用一组命名清晰的 tracker API 暴露，而非测试特判；③ sed 区段提取 + 机械替换（`c.Request.Context()`→ctx 等）显著降低大块搬迁的转录风险；④ 外部 SaaS 集成的薄代理型 controller，把「配置读取 + 校验/请求构造 + 纯投影」下沉即可让 controller 专注绑定/渲染，无需把每个 handler 都包一层 service。
+- 口径二下一候选（待评估）：`performance.go`（371 行）、`task_plugin_debug.go`（269 行）、`audit.go`（224 行）、`redemption.go`（223 行）、`SetTaskPluginStatus`（task_plugin.go 内 ~97 行状态机）。其余（`captcha`/`log`/`system_info`/`image`/`return_path` 等）多为薄控制器，不宜机械凑数。
 
 ### 8.3 验证
 
