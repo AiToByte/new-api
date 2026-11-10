@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -88,28 +89,15 @@ func AddRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err := validateExpiredTime(redemption.ExpiredTime); err != nil {
+	if err := service.ValidateRedemptionExpiry(redemption.ExpiredTime); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	var keys []string
-	for i := 0; i < redemption.Count; i++ {
-		key := common.GetUUID()
-		cleanRedemption := model.Redemption{
-			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
-			Key:         key,
-			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
-		}
-		err = cleanRedemption.Insert()
-		if err != nil {
-			common.SysError(common.LogText("failed to insert redemption: %s", err.Error()))
-			common.ApiErrorStatus(c, http.StatusOK, common.NewMessage("Failed to create redemption code, please try again later"), gin.H{"data": keys})
-			return
-		}
-		keys = append(keys, key)
+	keys, err := service.CreateRedemptionBatch(c.GetInt("id"), redemption.Name, redemption.Count, redemption.Quota, redemption.ExpiredTime)
+	if err != nil {
+		common.SysError(common.LogText("failed to insert redemption: %s", err.Error()))
+		common.ApiErrorStatus(c, http.StatusOK, common.NewMessage("Failed to create redemption code, please try again later"), gin.H{"data": keys})
+		return
 	}
 	recordManageAudit(c, "redemption.create", map[string]any{
 		"name":  redemption.Name,
@@ -156,7 +144,7 @@ func UpdateRedemption(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
-		if err := validateExpiredTime(redemption.ExpiredTime); err != nil {
+		if err := service.ValidateRedemptionExpiry(redemption.ExpiredTime); err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -185,13 +173,6 @@ func DeleteInvalidRedemption(c *gin.Context) {
 	}
 	common.ApiSuccess(c, rows)
 	return
-}
-
-func validateExpiredTime(expired int64) error {
-	if expired != 0 && expired < common.GetTimestamp() {
-		return common.NewMessage("Expiration time cannot be earlier than current time")
-	}
-	return nil
 }
 
 func DeleteRedemptionBatch(c *gin.Context) {
