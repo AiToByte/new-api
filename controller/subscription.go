@@ -386,7 +386,7 @@ func recordSubscriptionResetUserLogs(c *gin.Context, result *model.SubscriptionR
 	const action = "subscription.user_quota_reset"
 	params := map[string]any{"plan_id": result.PlanId, "plan_title": result.PlanTitle}
 	operation := model.AuditOperation{Action: action, Params: params}
-	content := auditContentEN(action, params)
+	content := service.AuditContentEN(action, params)
 	for _, userId := range result.AffectedUserIds {
 		model.RecordLogWithAdminInfo(userId, model.LogTypeManage, content, adminInfo, &operation, c)
 	}

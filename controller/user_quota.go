@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -31,7 +32,7 @@ func manageUserQuota(c *gin.Context, req ManageRequest) {
 	}
 	success := false
 	defer func() {
-		content := auditContentEN(action, params)
+		content := service.AuditContentEN(action, params)
 		if !success {
 			// Failed requests have no committed balance changes to render.
 			content = "Failed user quota adjustment"
@@ -78,6 +79,6 @@ func manageUserQuota(c *gin.Context, req ManageRequest) {
 	success = true
 	operation := model.AuditOperation{Action: action, Params: params}
 	model.RecordLogWithAdminInfo(adjustment.UserID, model.LogTypeTopup,
-		auditContentEN(action, params), auditOperatorInfo(c), &operation, c)
+		service.AuditContentEN(action, params), auditOperatorInfo(c), &operation, c)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 }
