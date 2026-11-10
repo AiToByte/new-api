@@ -1,4 +1,4 @@
-package controller
+package service
 
 import (
 	"testing"
@@ -15,11 +15,11 @@ func TestPaymentReturnPathUsesDefaultDashboardRoutes(t *testing.T) {
 	assert.Equal(
 		t,
 		"https://dashboard.example.com/wallet?pay=success",
-		paymentReturnPath("/wallet?pay=success"),
+		PaymentReturnPath("/wallet?pay=success"),
 	)
 	assert.Equal(
 		t,
 		"https://dashboard.example.com/usage-logs",
-		paymentReturnPath("/usage-logs"),
+		PaymentReturnPath("/usage-logs"),
 	)
 }
