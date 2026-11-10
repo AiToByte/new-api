@@ -9,6 +9,7 @@ import (
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -115,7 +116,16 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
 }
 
+// SubscriptionEpayNotify 处理易支付服务端异步通知。
+// 与充值回调 EpayNotify 共用同一门禁：撤销合规确认或清空商户验签凭证后，
+// 存量 pending 订单不得再被合法签名结算，保证「停用生效」。
 func SubscriptionEpayNotify(c *gin.Context) {
+	if !service.IsEpayWebhookEnabled() {
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription webhook rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+
 	var params map[string]string
 
 	if c.Request.Method == "POST" {
@@ -170,7 +180,15 @@ func SubscriptionEpayNotify(c *gin.Context) {
 
 // SubscriptionEpayReturn handles browser return after payment.
 // It verifies the payload and completes the order, then redirects to console.
+// 浏览器回跳同样会结算订单，因此必须与异步通知使用同一门禁，
+// 否则撤销合规后仍可通过构造回跳请求绕过停用。
 func SubscriptionEpayReturn(c *gin.Context) {
+	if !service.IsEpayWebhookEnabled() {
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription return rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
+		c.Redirect(http.StatusFound, service.PaymentReturnPath("/wallet?pay=fail"))
+		return
+	}
+
 	var params map[string]string
 
 	if c.Request.Method == "POST" {
