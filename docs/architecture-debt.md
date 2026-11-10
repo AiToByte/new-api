@@ -410,3 +410,4 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 注：三方言矩阵由 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN` 环境变量驱动，**未设置时 mysql/postgres 子测试静默 skip**；此前若干“子集通过”实为仅 sqlite 执行，全量口径须显式带 DSN。
 - **下沉批次后终版全量回归（回填 2026-10-21 下午）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN —— **1289.631s 全绿、零失败（EXIT=0）**。覆盖本批全部下沉提交（oauth/wechat/channel-test/setup/user + 8 个业务域）。另跑 `./model/ ./service/ ./middleware/`（同为改动包）。
 - 全 controller 全量仍受 Windows SQLite 文件锁/多 DB 池影响，看门禁以 CI（Linux）为准（同 3.3 既有结论）。
+- **口径二第五/六弹后终版全量回归（回填 2026-11-10）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN —— **304.249s 全绿、零失败（EXIT=0）**。三方言实证执行：`TestModelManagementDatabaseMatrix` 的 sqlite/mysql/postgres 三分支全 PASS（mysql/pg 各自建隔离库 `newapi_audit_*`）。注：本次重建了全新测试容器，耗时比 2026-10-21 的 1289.631s 快约 4 倍——推断为旧容器累积上千个 `newapi_audit_*` 隔离库导致 DDL 元数据膨胀；**回归前重建空容器可作为提速手段**（`mysql:8` / `postgres:15` 本地镜像，端口 13306/15432，root/123456）。
