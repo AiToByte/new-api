@@ -10,32 +10,27 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/ionet"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
 func getIoAPIKey(c *gin.Context) (string, bool) {
-	common.OptionMapRWMutex.RLock()
-	enabled := common.OptionMap["model_deployment.ionet.enabled"] == "true"
-	apiKey := common.OptionMap["model_deployment.ionet.api_key"]
-	common.OptionMapRWMutex.RUnlock()
-	if !enabled || strings.TrimSpace(apiKey) == "" {
-		common.ApiErrorMsg(c, "io.net model deployment is not enabled or api key missing")
+	apiKey, err := service.IoNetAPIKey()
+	if err != nil {
+		common.ApiErrorMsg(c, service.ErrIoNetNotConfigured.Error())
 		return "", false
 	}
 	return apiKey, true
 }
 
 func GetModelDeploymentSettings(c *gin.Context) {
-	common.OptionMapRWMutex.RLock()
-	enabled := common.OptionMap["model_deployment.ionet.enabled"] == "true"
-	hasAPIKey := strings.TrimSpace(common.OptionMap["model_deployment.ionet.api_key"]) != ""
-	common.OptionMapRWMutex.RUnlock()
+	enabled, configured := service.ModelDeploymentSettings()
 
 	common.ApiSuccess(c, gin.H{
 		"provider":    "io.net",
 		"enabled":     enabled,
-		"configured":  hasAPIKey,
-		"can_connect": enabled && hasAPIKey,
+		"configured":  configured,
+		"can_connect": enabled && configured,
 	})
 }
 
@@ -74,18 +69,14 @@ func TestIoNetConnection(c *gin.Context) {
 
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" {
-		common.OptionMapRWMutex.RLock()
-		storedKey := strings.TrimSpace(common.OptionMap["model_deployment.ionet.api_key"])
-		common.OptionMapRWMutex.RUnlock()
-		if storedKey == "" {
+		apiKey = service.StoredIoNetAPIKey()
+		if apiKey == "" {
 			common.ApiErrorMsg(c, "api_key is required")
 			return
 		}
-		apiKey = storedKey
 	}
 
-	client := ionet.NewEnterpriseClient(apiKey)
-	result, err := client.GetMaxGPUsPerContainer()
+	hardwareCount, totalAvailable, err := service.ValidateIoNetAPIKey(apiKey)
 	if err != nil {
 		if apiErr, ok := err.(*ionet.APIError); ok {
 			message := strings.TrimSpace(apiErr.Message)
@@ -99,20 +90,8 @@ func TestIoNetConnection(c *gin.Context) {
 		return
 	}
 
-	totalHardware := 0
-	totalAvailable := 0
-	if result != nil {
-		totalHardware = len(result.Hardware)
-		totalAvailable = result.Total
-		if totalAvailable == 0 {
-			for _, hw := range result.Hardware {
-				totalAvailable += hw.Available
-			}
-		}
-	}
-
 	common.ApiSuccess(c, gin.H{
-		"hardware_count":  totalHardware,
+		"hardware_count":  hardwareCount,
 		"total_available": totalAvailable,
 	})
 }
@@ -133,74 +112,6 @@ func requireContainerID(c *gin.Context) (string, bool) {
 		return "", false
 	}
 	return containerID, true
-}
-
-func mapIoNetDeployment(d ionet.Deployment) map[string]any {
-	var created int64
-	if d.CreatedAt.IsZero() {
-		created = time.Now().Unix()
-	} else {
-		created = d.CreatedAt.Unix()
-	}
-
-	timeRemainingHours := d.ComputeMinutesRemaining / 60
-	timeRemainingMins := d.ComputeMinutesRemaining % 60
-	var timeRemaining string
-	if timeRemainingHours > 0 {
-		timeRemaining = fmt.Sprintf("%d hour %d minutes", timeRemainingHours, timeRemainingMins)
-	} else if timeRemainingMins > 0 {
-		timeRemaining = fmt.Sprintf("%d minutes", timeRemainingMins)
-	} else {
-		timeRemaining = "completed"
-	}
-
-	hardwareInfo := fmt.Sprintf("%s %s x%d", d.BrandName, d.HardwareName, d.HardwareQuantity)
-
-	return map[string]any{
-		"id":                        d.ID,
-		"deployment_name":           d.Name,
-		"container_name":            d.Name,
-		"status":                    strings.ToLower(d.Status),
-		"type":                      "Container",
-		"time_remaining":            timeRemaining,
-		"time_remaining_minutes":    d.ComputeMinutesRemaining,
-		"hardware_info":             hardwareInfo,
-		"hardware_name":             d.HardwareName,
-		"brand_name":                d.BrandName,
-		"hardware_quantity":         d.HardwareQuantity,
-		"completed_percent":         d.CompletedPercent,
-		"compute_minutes_served":    d.ComputeMinutesServed,
-		"compute_minutes_remaining": d.ComputeMinutesRemaining,
-		"created_at":                created,
-		"updated_at":                created,
-		"model_name":                "",
-		"model_version":             "",
-		"instance_count":            d.HardwareQuantity,
-		"resource_config": map[string]any{
-			"cpu":    "",
-			"memory": "",
-			"gpu":    strconv.Itoa(d.HardwareQuantity),
-		},
-		"description": "",
-		"provider":    "io.net",
-	}
-}
-
-func computeStatusCounts(total int, deployments []ionet.Deployment) map[string]int64 {
-	counts := map[string]int64{
-		"all": int64(total),
-	}
-
-	for _, status := range []string{"running", "completed", "failed", "deployment requested", "termination requested", "destroyed"} {
-		counts[status] = 0
-	}
-
-	for _, d := range deployments {
-		status := strings.ToLower(strings.TrimSpace(d.Status))
-		counts[status] = counts[status] + 1
-	}
-
-	return counts
 }
 
 func GetAllDeployments(c *gin.Context) {
@@ -227,7 +138,7 @@ func GetAllDeployments(c *gin.Context) {
 
 	items := make([]map[string]any, 0, len(dl.Deployments))
 	for _, d := range dl.Deployments {
-		items = append(items, mapIoNetDeployment(d))
+		items = append(items, service.MapIoNetDeployment(d))
 	}
 
 	data := gin.H{
@@ -235,7 +146,7 @@ func GetAllDeployments(c *gin.Context) {
 		"page_size":     pageInfo.GetPageSize(),
 		"total":         dl.Total,
 		"items":         items,
-		"status_counts": computeStatusCounts(dl.Total, dl.Deployments),
+		"status_counts": service.ComputeDeploymentStatusCounts(dl.Total, dl.Deployments),
 	}
 	common.ApiSuccess(c, data)
 }
@@ -276,7 +187,7 @@ func SearchDeployments(c *gin.Context) {
 
 	items := make([]map[string]any, 0, len(filtered))
 	for _, d := range filtered {
-		items = append(items, mapIoNetDeployment(d))
+		items = append(items, service.MapIoNetDeployment(d))
 	}
 
 	total := dl.Total
@@ -450,7 +361,7 @@ func ExtendDeployment(c *gin.Context) {
 		return
 	}
 
-	data := mapIoNetDeployment(ionet.Deployment{
+	data := service.MapIoNetDeployment(ionet.Deployment{
 		ID:                      details.ID,
 		Status:                  details.Status,
 		Name:                    deploymentID,
