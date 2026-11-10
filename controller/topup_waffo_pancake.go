@@ -340,7 +340,7 @@ func getWaffoPancakeBuyerIdentity(user *model.User) string {
 }
 
 func RequestWaffoPancakePay(c *gin.Context) {
-	if !isWaffoPancakeTopUpEnabled() {
+	if !service.IsWaffoPancakeTopUpEnabled() {
 		paymentError(c, common.NewMessage("Waffo Pancake configuration is incomplete"))
 		return
 	}
@@ -429,7 +429,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 }
 
 func WaffoPancakeWebhook(c *gin.Context) {
-	if !isWaffoPancakeWebhookEnabled() {
+	if !service.IsWaffoPancakeWebhookEnabled() {
 		logger.LogWarn(c.Request.Context(), common.LogText("Waffo Pancake webhook rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
 		c.String(http.StatusForbidden, "webhook disabled")
 		return

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -44,13 +45,13 @@ func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.StripeWebhookSecret = ""
 	setting.StripeApiSecret = "sk_test_123"
 	setting.StripePriceId = "price_123"
-	require.False(t, isStripeWebhookEnabled())
+	require.False(t, service.IsStripeWebhookEnabled())
 
 	setting.StripeWebhookSecret = "whsec_test"
-	require.True(t, isStripeWebhookEnabled())
+	require.True(t, service.IsStripeWebhookEnabled())
 
 	setting.StripePriceId = ""
-	require.False(t, isStripeWebhookEnabled())
+	require.False(t, service.IsStripeWebhookEnabled())
 }
 
 func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
@@ -67,13 +68,13 @@ func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.CreemWebhookSecret = ""
 	setting.CreemApiKey = "creem_api_key"
 	setting.CreemProducts = `[{"productId":"prod_123"}]`
-	require.False(t, isCreemWebhookEnabled())
+	require.False(t, service.IsCreemWebhookEnabled())
 
 	setting.CreemWebhookSecret = "creem_secret"
-	require.True(t, isCreemWebhookEnabled())
+	require.True(t, service.IsCreemWebhookEnabled())
 
 	setting.CreemProducts = "[]"
-	require.False(t, isCreemWebhookEnabled())
+	require.False(t, service.IsCreemWebhookEnabled())
 }
 
 func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
@@ -102,23 +103,23 @@ func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.WaffoApiKey = ""
 	setting.WaffoPrivateKey = "private"
 	setting.WaffoPublicCert = "public"
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, service.IsWaffoWebhookEnabled())
 
 	setting.WaffoApiKey = "api"
-	require.True(t, isWaffoWebhookEnabled())
+	require.True(t, service.IsWaffoWebhookEnabled())
 
 	setting.WaffoEnabled = false
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, service.IsWaffoWebhookEnabled())
 
 	setting.WaffoEnabled = true
 	setting.WaffoSandbox = true
 	setting.WaffoSandboxApiKey = ""
 	setting.WaffoSandboxPrivateKey = "sandbox_private"
 	setting.WaffoSandboxPublicCert = "sandbox_public"
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, service.IsWaffoWebhookEnabled())
 
 	setting.WaffoSandboxApiKey = "sandbox_api"
-	require.True(t, isWaffoWebhookEnabled())
+	require.True(t, service.IsWaffoWebhookEnabled())
 }
 
 func TestWaffoPancakeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
@@ -138,17 +139,17 @@ func TestWaffoPancakeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.WaffoPancakeMerchantID = ""
 	setting.WaffoPancakePrivateKey = "private"
 	setting.WaffoPancakeProductID = "product"
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, service.IsWaffoPancakeWebhookEnabled())
 
 	setting.WaffoPancakeMerchantID = "merchant"
-	require.True(t, isWaffoPancakeWebhookEnabled())
+	require.True(t, service.IsWaffoPancakeWebhookEnabled())
 
 	setting.WaffoPancakeProductID = ""
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, service.IsWaffoPancakeWebhookEnabled())
 
 	setting.WaffoPancakeProductID = "product"
 	setting.WaffoPancakePrivateKey = ""
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, service.IsWaffoPancakeWebhookEnabled())
 }
 
 func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
@@ -168,13 +169,13 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	operation_setting.EpayId = "epay_id"
 	operation_setting.EpayKey = ""
 	operation_setting.PayMethods = []map[string]string{{"type": "alipay"}}
-	require.False(t, isEpayWebhookEnabled())
+	require.False(t, service.IsEpayWebhookEnabled())
 
 	operation_setting.EpayKey = "epay_key"
-	require.True(t, isEpayWebhookEnabled())
+	require.True(t, service.IsEpayWebhookEnabled())
 
 	operation_setting.PayMethods = nil
-	require.False(t, isEpayWebhookEnabled())
+	require.False(t, service.IsEpayWebhookEnabled())
 }
 
 func TestEpayCallbacksVerifyBeforeSettlement(t *testing.T) {
@@ -201,7 +202,7 @@ func TestEpayCallbacksVerifyBeforeSettlement(t *testing.T) {
 	// Rejected callbacks and valid non-success events must never reach settlement.
 	// A nil database makes an accidental attempt to settle fail the test.
 	model.DB = nil
-	require.True(t, isEpayWebhookEnabled())
+	require.True(t, service.IsEpayWebhookEnabled())
 
 	// Both ambiguous maps below had this same valid signing string in v0.0.4.
 	// This must fail because of parameter ambiguity, not a mismatched signature.

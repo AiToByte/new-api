@@ -1,4 +1,4 @@
-package controller
+package service
 
 import (
 	"strings"
@@ -7,12 +7,17 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
-func isPaymentComplianceConfirmed() bool {
+// Payment channel availability rules. These predicates decide whether a top-up
+// channel and its webhook are usable based on compliance confirmation and the
+// configured credentials. They read only setting state, so they belong in the
+// service layer.
+
+func IsPaymentComplianceConfirmed() bool {
 	return operation_setting.IsPaymentComplianceConfirmed()
 }
 
-func isStripeTopUpEnabled() bool {
-	if !isPaymentComplianceConfirmed() {
+func IsStripeTopUpEnabled() bool {
+	if !IsPaymentComplianceConfirmed() {
 		return false
 	}
 	return strings.TrimSpace(setting.StripeApiSecret) != "" &&
@@ -20,16 +25,16 @@ func isStripeTopUpEnabled() bool {
 		strings.TrimSpace(setting.StripePriceId) != ""
 }
 
-func isStripeWebhookConfigured() bool {
+func IsStripeWebhookConfigured() bool {
 	return strings.TrimSpace(setting.StripeWebhookSecret) != ""
 }
 
-func isStripeWebhookEnabled() bool {
-	return isStripeTopUpEnabled()
+func IsStripeWebhookEnabled() bool {
+	return IsStripeTopUpEnabled()
 }
 
-func isCreemTopUpEnabled() bool {
-	if !isPaymentComplianceConfirmed() {
+func IsCreemTopUpEnabled() bool {
+	if !IsPaymentComplianceConfirmed() {
 		return false
 	}
 	products := strings.TrimSpace(setting.CreemProducts)
@@ -38,26 +43,26 @@ func isCreemTopUpEnabled() bool {
 		products != "[]"
 }
 
-func isCreemWebhookConfigured() bool {
+func IsCreemWebhookConfigured() bool {
 	return strings.TrimSpace(setting.CreemWebhookSecret) != ""
 }
 
-func isCreemWebhookEnabled() bool {
-	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
+func IsCreemWebhookEnabled() bool {
+	return IsCreemTopUpEnabled() && IsCreemWebhookConfigured()
 }
 
-func isWaffoTopUpEnabled() bool {
-	if !isPaymentComplianceConfirmed() {
+func IsWaffoTopUpEnabled() bool {
+	if !IsPaymentComplianceConfirmed() {
 		return false
 	}
 	if !setting.WaffoEnabled {
 		return false
 	}
 
-	return isWaffoWebhookConfigured()
+	return IsWaffoWebhookConfigured()
 }
 
-func isWaffoWebhookConfigured() bool {
+func IsWaffoWebhookConfigured() bool {
 	if setting.WaffoSandbox {
 		return strings.TrimSpace(setting.WaffoSandboxApiKey) != "" &&
 			strings.TrimSpace(setting.WaffoSandboxPrivateKey) != "" &&
@@ -69,12 +74,12 @@ func isWaffoWebhookConfigured() bool {
 		strings.TrimSpace(setting.WaffoPublicCert) != ""
 }
 
-func isWaffoWebhookEnabled() bool {
-	return isWaffoTopUpEnabled()
+func IsWaffoWebhookEnabled() bool {
+	return IsWaffoTopUpEnabled()
 }
 
-func isWaffoPancakeTopUpEnabled() bool {
-	if !isPaymentComplianceConfirmed() {
+func IsWaffoPancakeTopUpEnabled() bool {
+	if !IsPaymentComplianceConfirmed() {
 		return false
 	}
 	// Presence-of-credentials = enabled. Webhook public keys ship inside
@@ -84,27 +89,27 @@ func isWaffoPancakeTopUpEnabled() bool {
 		strings.TrimSpace(setting.WaffoPancakeProductID) != ""
 }
 
-func isWaffoPancakeWebhookConfigured() bool {
-	return isWaffoPancakeTopUpEnabled()
+func IsWaffoPancakeWebhookConfigured() bool {
+	return IsWaffoPancakeTopUpEnabled()
 }
 
-func isWaffoPancakeWebhookEnabled() bool {
-	return isWaffoPancakeTopUpEnabled()
+func IsWaffoPancakeWebhookEnabled() bool {
+	return IsWaffoPancakeTopUpEnabled()
 }
 
-func isEpayTopUpEnabled() bool {
-	if !isPaymentComplianceConfirmed() {
+func IsEpayTopUpEnabled() bool {
+	if !IsPaymentComplianceConfirmed() {
 		return false
 	}
-	return isEpayWebhookConfigured() && len(operation_setting.PayMethods) > 0
+	return IsEpayWebhookConfigured() && len(operation_setting.PayMethods) > 0
 }
 
-func isEpayWebhookConfigured() bool {
+func IsEpayWebhookConfigured() bool {
 	return strings.TrimSpace(operation_setting.PayAddress) != "" &&
 		strings.TrimSpace(operation_setting.EpayId) != "" &&
 		strings.TrimSpace(operation_setting.EpayKey) != ""
 }
 
-func isEpayWebhookEnabled() bool {
-	return isEpayTopUpEnabled()
+func IsEpayWebhookEnabled() bool {
+	return IsEpayTopUpEnabled()
 }
