@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -20,7 +23,7 @@ import (
 // reconcileOrder 对指定类型的订单执行金额对账。
 // 充值与订阅订单分属两张表，trade_no 各自独立；明确指定类型可以杜绝
 // 「充值回调误读到同名订阅订单快照」这类跨表歧义。
-func reconcileOrder(snapshot model.OrderAmountSnapshot, paid *PaidAmount) error {
+func reconcileOrder(tradeNo string, snapshot model.OrderAmountSnapshot, paid *PaidAmount) error {
 	if paid == nil {
 		return nil
 	}
@@ -32,10 +35,12 @@ func reconcileOrder(snapshot model.OrderAmountSnapshot, paid *PaidAmount) error 
 	if err != nil {
 		return err
 	}
-	// 缺少金额快照的历史订单只做保守校验（金额 > 0、币种一致）。
-	// 这里不阻断升级前创建的在途订单；warn 由 ReconcilePaidAmount 返回，
-	// 调用方可按需记录告警日志。
-	_ = warn
+	// 降级为保守校验时必须留痕：这类订单只校验了「金额 > 0」与币种，
+	// 金额本身未与服务端快照比对。若长期大量出现，说明下单侧没有写入
+	// 快照或回调格式变化，需要运营排查，不能静默放行。
+	if warn != nil {
+		logger.LogWarn(context.Background(), common.LogText("payment amount reconciliation degraded trade_no=%s reason=%q", tradeNo, warn.Reason))
+	}
 	return nil
 }
 
@@ -44,7 +49,7 @@ func reconcileTopUp(tradeNo string, paid *PaidAmount) error {
 	if paid == nil {
 		return nil
 	}
-	return reconcileOrder(model.GetTopUpAmountSnapshot(tradeNo), paid)
+	return reconcileOrder(tradeNo, model.GetTopUpAmountSnapshot(tradeNo), paid)
 }
 
 // reconcileSubscription 在订阅结算前对账。
@@ -52,7 +57,7 @@ func reconcileSubscription(tradeNo string, paid *PaidAmount) error {
 	if paid == nil {
 		return nil
 	}
-	return reconcileOrder(model.GetSubscriptionOrderAmountSnapshot(tradeNo), paid)
+	return reconcileOrder(tradeNo, model.GetSubscriptionOrderAmountSnapshot(tradeNo), paid)
 }
 
 // IsPaymentAmountRejected 判断结算错误是否属于「金额对账拒绝」。
