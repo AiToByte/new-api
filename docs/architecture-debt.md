@@ -417,3 +417,46 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - **下沉批次后终版全量回归（回填 2026-10-21 下午）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN —— **1289.631s 全绿、零失败（EXIT=0）**。覆盖本批全部下沉提交（oauth/wechat/channel-test/setup/user + 8 个业务域）。另跑 `./model/ ./service/ ./middleware/`（同为改动包）。
 - 全 controller 全量仍受 Windows SQLite 文件锁/多 DB 池影响，看门禁以 CI（Linux）为准（同 3.3 既有结论）。
 - **口径二第五/六弹后终版全量回归（回填 2026-11-10）**：`go test ./controller/ -count=1 -timeout 40m` + 三方言 DSN —— **304.249s 全绿、零失败（EXIT=0）**。三方言实证执行：`TestModelManagementDatabaseMatrix` 的 sqlite/mysql/postgres 三分支全 PASS（mysql/pg 各自建隔离库 `newapi_audit_*`）。注：本次重建了全新测试容器，耗时比 2026-10-21 的 1289.631s 快约 4 倍——推断为旧容器累积上千个 `newapi_audit_*` 隔离库导致 DDL 元数据膨胀；**回归前重建空容器可作为提速手段**（`mysql:8` / `postgres:15` 本地镜像，端口 13306/15432，root/123456）。
+
+### 8.4 性能与资金安全综合研判及 P0 修复（2026-11-10 ~ 11-11）
+
+四线只读研判（付款安全 / 认证与越权 / 性能热点 / 通用代码安全）后，按「不破坏既有契约、不误拒正常付款」原则实施以下 P0 修复。用户要求：中文注释完整、架构健壮、不引入回归。
+
+| 提交 | 修复 | 要点 |
+|---|---|---|
+| `ebac75529` | #2 webhook 开关与充值项解耦 + #4 Epay 订阅门禁 | `service/payment_availability.go` 明确区分 TopUp（要求充值商品）与 Webhook（只要合规 + 验签凭证）；仅配订阅计划时不再出现「已收款、回调 403、渠道停止重试」。`SubscriptionEpayNotify`/`SubscriptionEpayReturn` 补同一门禁。测试重写锁定新边界，新增 `TestEpayCallbacksRejectedWhenWebhookDisabled`（nil DB 证明门禁在结算之前）。 |
+| `6dd86f88d` | #7 日志凭据泄露 | 新增 `common.LogFingerprint`（HMAC-SHA256 + CryptoSecret，取 16 hex）：签名/回调 body/Epay verify payload/API 响应/兑换码全部改为不可逆指纹。**刻意不改动 `LogText` 格式串**（它是 `log_text.zh-CN.json` 的翻译 key），故 20 条既有中文翻译全部保留。OWASP：认证/支付事件日志不得记录可用凭据。 |
+| `3c4b4e0a8` | #1 金额对账 + #3 先落单/失败重试 | 见下。 |
+
+#### #1 金额对账（最高资损风险）
+
+- 威胁：渠道侧 100%-off 优惠券会让 `payment_status=paid` 但 `amount_total=0`；旧实现验签后只按本地订单金额入账，不核对实付金额 → 额度凭空增发。
+- 架构：`service/payment_reconciliation.go` 定义 `PaidAmount`/`OrderAmount` 与 `ReconcilePaidAmount`；`service/payment_fulfillment.go` 成为**强制**结算 seam（所有回调必须传已验签实付金额，内部路径传 nil）；`model/payment_amount_snapshot.go` + `TopUp`/`SubscriptionOrder` 各 3 列（AutoMigrate 自动加列）持久化下单时的金额/币种/商品快照。
+- **避免过度设计导致误拒**（本次最关键的设计约束）：
+  - 快照存「下单时提交给渠道的金额字符串」，不存内部 `float64`：Waffo 零小数币种（JPY/KRW）会取整，用 float 会误拒。
+  - Stripe 充值 `Money` 是 `GetChargedAmount` 的「充值额度金额」，与 Stripe `Price×Quantity` 实付不是同一概念 → **不写金额快照**，只靠「实付 > 0」拦截 0 元券。
+  - Stripe/Creem/Pancake 订阅由渠道侧 Price/Product 定价，本地 `plan.PriceAmount` 不是权威来源 → 不写金额快照，只写币种/商品绑定。
+  - Epay 回调不带币种，传空表示「未知」，不硬编码 CNY（否则与订阅计划币种冲突误拒）。
+  - Waffo 优先用 `OrderAmount`（与下单快照同源），`FinalDealAmount` 可能含渠道折扣/汇率，直接比对会误拒。
+  - 回调无金额字段（如部分异步支付成功事件）或历史订单无快照 → 只做保守校验并告警，绝不误判为 0 元。
+  - 充值/订阅快照按各自表读取，消除「充值回调误读同名订阅快照」的跨表歧义。
+- 覆盖：Stripe / Creem / Epay / Waffo / WaffoPancake 的充值与订阅共 10 个结算入口。
+
+#### #3 Stripe 下单竞态与重试
+
+- 旧实现先建 Checkout Session 后落单，且 webhook 无论成败都返 2xx（渠道收到即停止重试）→ DB 抖动或回调早于落库时「收款成功、额度未入账」且永不补单。
+- 现在先落单、后建 Session；建 Session 失败把订单标记 Failed（充值）/ Expire（订阅），不留 pending 孤儿单。
+- `StripeWebhook` 引入 `stripeSettlementOutcome` 四类结果：永久拒绝（金额对账）返 200 不重试；临时失败（订单缺失/DB 抖动）返 **503** 触发 Stripe 重投；成功/忽略返 200。幂等仍由 model 行锁 + 状态 CAS 保证。
+
+#### 验证与 OWASP 依据
+
+- 依据：OWASP Authentication Cheat Sheet（敏感操作重认证、凭据轮换、认证事件日志不记密钥）、Session Management Cheat Sheet（特权变更后会话 ID 更新/销毁、服务端强制失效、日志用盐哈希关联而非原始凭据）、项目 AGENTS.md 的 OWASP 强制条款。
+- 新增测试：`service/payment_reconciliation_test.go`（0 元拒绝、金额/币种/商品不符、合法付款、无快照与缺金额字段的向后兼容）、`controller/stripe_amount_test.go`（0 元券事件解析、分→主单位换算、缺字段不阻断、结算结果分类）、`common/log_safety_test.go`（指纹确定性/不泄露/空值）。
+- `gofmt`/`go build ./...`/`go vet` 全绿；定向支付回归全绿。
+
+#### 未决项（不擅自改动，需产品决策或前后端协同）
+
+- **#5 `add_quota` 二次验证**：`service/security_verification.go:52` 注释明确「Quota adjustments are not gated」，`security_enrollment_test.go:778` 把 `add_quota` 从 `admin.user.manage` scope 排除，前端无 proof 传递链路——属**有意设计**。强加 proof 会破坏管理员现网功能，需前后端协同设计新 scope 与迁移方案。
+- **#6 改密不撤 PAT/relay token**：`service/auth_session.go:212` 明示 token 保持有效；OWASP 两份 Cheat Sheet 均未强制「改密后全局撤销所有 token」（Session Management 明列为 coverage gap，仅要求会话 ID 更新/销毁与重认证）。且 relay token 是 API 网关核心凭据，全局撤销是产品级决策，需评估业务影响。当前缓解：`auth_version` 递增使浏览器会话失效；软/硬删用户会删 PAT 并清缓存；禁用用户被 Status 拒。
+- **P1 性能**（本次未改）：`channel_cache.go:129` 全局读锁覆盖整段选渠道 + 写方三重循环；`model/log.go:101` 每请求同步 INSERT；后台 goroutine/ticker 无 context；`model/channel.go:446` SearchChannels 内存分页（3.6 既有项）。
+- **P1 SSRF**：项目已有 `common/ssrf_protection.go`/`service/protected_fetch_client.go`，但 `custom_oauth.go:157`、`service/ratio_sync.go:741`、`service/uptime_kuma.go:146` 的管理员/匿名外发请求未复用（均 RootAuth 或匿名可达，需单独设计）。
