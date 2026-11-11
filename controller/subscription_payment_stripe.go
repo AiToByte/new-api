@@ -78,13 +78,8 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	reference := fmt.Sprintf("sub-stripe-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference))
 
-	payLink, err := service.GenStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, plan.StripePriceId)
-	if err != nil {
-		logger.LogError(c.Request.Context(), common.LogText("Stripe failed to create subscription payment link trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
-		paymentError(c, common.NewMessage("Failed to start payment"))
-		return
-	}
-
+	// 先落单、后创建 Checkout Session：避免 webhook 早于订单入库导致
+	// 「已收款、订阅未开通」，且旧实现无条件 2xx 会让渠道停止重试。
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
@@ -95,8 +90,23 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// Stripe 订阅由渠道侧 Price 定价，本地 plan.PriceAmount 不是渠道实付的
+	// 权威来源，故不写金额快照；但仍绑定币种，且 client_reference_id +
+	// 渠道签名保证事件与订单一一对应。
+	order.SetExpectedPayment("", strings.ToUpper(strings.TrimSpace(plan.Currency)), "")
 	if err := order.Insert(); err != nil {
 		paymentError(c, common.NewMessage("Failed to create order"))
+		return
+	}
+
+	payLink, err := service.GenStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, plan.StripePriceId)
+	if err != nil {
+		// 会话创建失败时订单不可能被付款，立即置为失效，避免 pending 孤儿单。
+		if expireErr := model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderStripe); expireErr != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Stripe failed to expire orphan subscription order trade_no=%s error=%q", referenceId, expireErr.Error()))
+		}
+		logger.LogError(c.Request.Context(), common.LogText("Stripe failed to create subscription payment link trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
+		paymentError(c, common.NewMessage("Failed to start payment"))
 		return
 	}
 

@@ -9,14 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
-	"io"
-	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -125,6 +127,11 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// 记录下单时服务端确定的实付金额，供回调结算前对账。
+	// Creem 由渠道侧 Product 定价，本地配置的 Price 不是渠道实付的权威来源，
+	// 故不写金额快照（避免配置不一致时误拒正常付款），只绑定商品 ID，
+	// 防止用低价商品的已验签付款去结算高价商品的订单。
+	topUp.SetExpectedPayment("", selectedProduct.Currency, selectedProduct.ProductId)
 	err = topUp.Insert()
 	if err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Creem failed to create top-up order user_id=%d trade_no=%s product_id=%s error=%q", id, referenceId, selectedProduct.ProductId, err.Error()))
@@ -312,7 +319,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	// Try complete subscription order first
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := service.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event), model.PaymentProviderCreem, ""); err == nil {
+	if err := service.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event), model.PaymentProviderCreem, "", creemPaidAmount(event)); err == nil {
 		logger.LogInfo(c.Request.Context(), common.LogText("Creem subscription order processed trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
 		c.Status(http.StatusOK)
 		return
@@ -357,7 +364,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		logger.LogWarn(c.Request.Context(), common.LogText("Creem callback customer name is empty trade_no=%s creem_order_id=%s", referenceId, event.Object.Order.Id))
 	}
 
-	err := service.RechargeCreem(referenceId, customerEmail, customerName, c.ClientIP())
+	err := service.RechargeCreem(referenceId, customerEmail, customerName, c.ClientIP(), creemPaidAmount(event))
 	if err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Creem top-up processing failed trade_no=%s creem_order_id=%s client_ip=%s error=%q", referenceId, event.Object.Order.Id, c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusInternalServerError)
@@ -464,4 +471,15 @@ func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct
 
 	logger.LogInfo(ctx, common.LogText("Creem payment link created trade_no=%s response_id=%s checkout_url=%q", referenceId, checkoutResp.Id, checkoutResp.CheckoutUrl))
 	return checkoutResp.CheckoutUrl, nil
+}
+
+// creemPaidAmount 从已验签的 Creem 事件提取实付金额。
+// AmountPaid 是最小货币单位（分），Currency 为 ISO 4217，Product.Id 用于
+// 绑定下单时选定的商品，防止用低价商品的付款结算高价订单。
+func creemPaidAmount(event *CreemWebhookEvent) *service.PaidAmount {
+	return service.ParsePaidAmountMinor(
+		strconv.Itoa(event.Object.Order.AmountPaid),
+		event.Object.Order.Currency,
+		event.Object.Product.Id,
+	)
 }

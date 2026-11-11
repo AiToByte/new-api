@@ -110,13 +110,11 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
 
-	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
-	if err != nil {
-		logger.LogError(c.Request.Context(), common.LogText("Stripe failed to create Checkout Session user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
-		paymentError(c, common.NewMessage("Failed to start payment"))
-		return
-	}
-
+	// 先落单、后创建 Checkout Session。
+	// Stripe 可能在用户完成付款后立即推送 webhook，若订单尚未入库，回调会
+	// 因「订单查无」被记失败；旧实现还无条件返回 2xx，导致 Stripe 停止重试，
+	// 最终「收款成功、额度未入账」。订单先在库可彻底消除该竞态。
+	// 若后续创建 Session 失败，把订单标记为 Failed，避免留下 pending 孤儿单。
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          req.Amount,
@@ -127,13 +125,29 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
-	err = topUp.Insert()
-	if err != nil {
+	// 注意：Stripe 充值的 Money 是 GetChargedAmount 得到的「充值额度金额」，
+	// 而渠道实付由 Stripe Price × Quantity 决定，两者不是同一概念，故此处
+	// 不写金额快照。回调仍会执行「实付金额 > 0」与币种一致性校验，
+	// 可拦截 100%-off 优惠券产生的 0 元 paid 事件。
+	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Stripe failed to create top-up order user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
 		paymentError(c, common.NewMessage("Failed to create order"))
 		return
 	}
 	logger.LogInfo(c.Request.Context(), common.LogText("Stripe top-up order created user_id=%d trade_no=%s amount=%d money=%.2f", id, referenceId, req.Amount, chargedMoney))
+
+	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
+	if err != nil {
+		// 创建渠道会话失败时，本地订单不可能被付款，标记为 Failed 以免
+		// 长期占用 pending 状态、也避免运营误判为「已收款未结算」。
+		topUp.Status = common.TopUpStatusFailed
+		if updateErr := topUp.Update(); updateErr != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Stripe failed to mark orphan top-up order as failed trade_no=%s error=%q", referenceId, updateErr.Error()))
+		}
+		logger.LogError(c.Request.Context(), common.LogText("Stripe failed to create Checkout Session user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
+		paymentError(c, common.NewMessage("Failed to start payment"))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
@@ -161,6 +175,24 @@ func RequestStripePay(c *gin.Context) {
 	}
 	stripeAdaptor.RequestPay(c, &req)
 }
+
+// stripeSettlementOutcome 描述一次 Stripe 回调的结算结果，决定给渠道的响应码。
+//
+// 旧实现无论结算成败都返回 2xx，Stripe 收到后即停止重试；一旦出现
+// 「订单尚未落库」「数据库短暂不可用」，就会造成「已收款、未入账」且
+// 永远无法自动补单。现在把结果分为四类，只有临时性失败返回 5xx 让渠道重试。
+type stripeSettlementOutcome int
+
+const (
+	// stripeSettlementIgnored：非结算事件或无需处理，返回 200。
+	stripeSettlementIgnored stripeSettlementOutcome = iota
+	// stripeSettlementSettled：结算成功，返回 200。
+	stripeSettlementSettled
+	// stripeSettlementRejected：金额对账等永久性拒绝，重试无意义，返回 200 并告警。
+	stripeSettlementRejected
+	// stripeSettlementRetryable：订单缺失、数据库抖动等临时失败，返回 503 触发重试。
+	stripeSettlementRetryable
+)
 
 func StripeWebhook(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -191,48 +223,56 @@ func StripeWebhook(c *gin.Context) {
 
 	callerIp := c.ClientIP()
 	logger.LogInfo(ctx, common.LogText("Stripe webhook signature verified event_type=%s client_ip=%s path=%q", string(event.Type), callerIp, c.Request.RequestURI))
+	outcome := stripeSettlementIgnored
 	switch event.Type {
 	case stripe.EventTypeCheckoutSessionCompleted:
-		sessionCompleted(ctx, event, callerIp)
+		outcome = sessionCompleted(ctx, event, callerIp)
 	case stripe.EventTypeCheckoutSessionExpired:
 		sessionExpired(ctx, event)
 	case stripe.EventTypeCheckoutSessionAsyncPaymentSucceeded:
-		sessionAsyncPaymentSucceeded(ctx, event, callerIp)
+		outcome = sessionAsyncPaymentSucceeded(ctx, event, callerIp)
 	case stripe.EventTypeCheckoutSessionAsyncPaymentFailed:
 		sessionAsyncPaymentFailed(ctx, event, callerIp)
 	default:
 		logger.LogInfo(ctx, common.LogText("Stripe webhook ignored event event_type=%s client_ip=%s", string(event.Type), callerIp))
 	}
 
+	if outcome == stripeSettlementRetryable {
+		// 5xx 会让 Stripe 按退避策略重投，从而自动补上临时失败期间的订单；
+		// 幂等由 model 层的行锁 + 状态 CAS 保证，重试不会重复入账。
+		logger.LogWarn(ctx, common.LogText("Stripe webhook settlement temporarily failed, requesting retry event_type=%s client_ip=%s", string(event.Type), callerIp))
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
 	c.Status(http.StatusOK)
 }
 
-func sessionCompleted(ctx context.Context, event stripe.Event, callerIp string) {
+func sessionCompleted(ctx context.Context, event stripe.Event, callerIp string) stripeSettlementOutcome {
 	customerId := event.GetObjectValue("customer")
 	referenceId := event.GetObjectValue("client_reference_id")
 	status := event.GetObjectValue("status")
 	if "complete" != status {
 		logger.LogWarn(ctx, common.LogText("Stripe checkout.completed has unexpected status, ignored trade_no=%s status=%s client_ip=%s", referenceId, status, callerIp))
-		return
+		return stripeSettlementIgnored
 	}
 
 	paymentStatus := event.GetObjectValue("payment_status")
 	if paymentStatus != "paid" {
 		logger.LogInfo(ctx, common.LogText("Stripe Checkout payment not completed, waiting for async result trade_no=%s payment_status=%s client_ip=%s", referenceId, paymentStatus, callerIp))
-		return
+		return stripeSettlementIgnored
 	}
 
-	fulfillOrder(ctx, event, referenceId, customerId, callerIp)
+	return fulfillOrder(ctx, event, referenceId, customerId, callerIp)
 }
 
 // sessionAsyncPaymentSucceeded handles delayed payment methods (bank transfer, SEPA, etc.)
 // that confirm payment after the checkout session completes.
-func sessionAsyncPaymentSucceeded(ctx context.Context, event stripe.Event, callerIp string) {
+func sessionAsyncPaymentSucceeded(ctx context.Context, event stripe.Event, callerIp string) stripeSettlementOutcome {
 	customerId := event.GetObjectValue("customer")
 	referenceId := event.GetObjectValue("client_reference_id")
 	logger.LogInfo(ctx, common.LogText("Stripe async payment succeeded trade_no=%s client_ip=%s", referenceId, callerIp))
 
-	fulfillOrder(ctx, event, referenceId, customerId, callerIp)
+	return fulfillOrder(ctx, event, referenceId, customerId, callerIp)
 }
 
 // sessionAsyncPaymentFailed marks orders as failed when delayed payment methods
@@ -273,38 +313,74 @@ func sessionAsyncPaymentFailed(ctx context.Context, event stripe.Event, callerIp
 	logger.LogInfo(ctx, common.LogText("Stripe top-up order marked as failed trade_no=%s client_ip=%s", referenceId, callerIp))
 }
 
-// fulfillOrder is the shared logic for crediting quota after payment is confirmed.
-func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, customerId string, callerIp string) {
+// stripePaidAmount 从「已验签」的 Stripe 事件提取实付金额。
+//
+// amount_total 是最小货币单位（分），需除以 100 转成主单位。若事件不带该字段
+// （例如部分异步支付成功事件），返回 AmountKnown=false，让对账只做币种校验并
+// 跳过金额比对，避免误拒合法事件；明确为 0 时才会在对账中被拒绝。
+// 金额一律用 decimal 解析，避免浮点误差把 0 元解析成极小正数。
+func stripePaidAmount(event stripe.Event) *service.PaidAmount {
+	paid := &service.PaidAmount{Currency: strings.ToUpper(strings.TrimSpace(event.GetObjectValue("currency")))}
+	raw := strings.TrimSpace(event.GetObjectValue("amount_total"))
+	if raw == "" {
+		return paid
+	}
+	minor, err := decimal.NewFromString(raw)
+	if err != nil {
+		return paid
+	}
+	paid.AmountKnown = true
+	paid.Amount = minor.Div(decimal.NewFromInt(100))
+	return paid
+}
+
+// fulfillOrder 是支付确认后入账的共享逻辑。
+// 返回值决定 webhook 响应码：永久性拒绝（金额对账）不重试，临时性失败
+// （订单缺失/DB 抖动）返回 5xx 让 Stripe 重投，成功或忽略返回 2xx。
+func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, customerId string, callerIp string) stripeSettlementOutcome {
 	if len(referenceId) == 0 {
 		logger.LogWarn(ctx, common.LogText("Stripe order completion missing order number client_ip=%s", callerIp))
-		return
+		return stripeSettlementIgnored
 	}
 
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
+	// 结算前必须携带已验签的实付金额，由 service 统一核对金额/币种，
+	// 防止 100%-off 优惠券产生 paid 但 0 元的事件全额入账。
+	paid := stripePaidAmount(event)
 	payload := map[string]any{
 		"customer":     customerId,
 		"amount_total": event.GetObjectValue("amount_total"),
 		"currency":     strings.ToUpper(event.GetObjectValue("currency")),
 		"event_type":   string(event.Type),
 	}
-	if err := service.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload), model.PaymentProviderStripe, ""); err == nil {
+	if err := service.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload), model.PaymentProviderStripe, "", paid); err == nil {
 		logger.LogInfo(ctx, common.LogText("Stripe subscription order processed trade_no=%s event_type=%s client_ip=%s", referenceId, string(event.Type), callerIp))
-		return
-	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+		return stripeSettlementSettled
+	} else if !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+		// 金额对账拒绝属于安全事件：记录专用告警，且不回退到充值结算。
+		if service.IsPaymentAmountRejected(err) {
+			logger.LogWarn(ctx, common.LogText("Stripe settlement rejected by amount reconciliation trade_no=%s event_type=%s client_ip=%s reason=%q", referenceId, string(event.Type), callerIp, err.Error()))
+			return stripeSettlementRejected
+		}
 		logger.LogError(ctx, common.LogText("Stripe subscription order processing failed trade_no=%s event_type=%s client_ip=%s error=%q", referenceId, string(event.Type), callerIp, err.Error()))
-		return
+		return stripeSettlementRetryable
 	}
 
-	err := model.Recharge(referenceId, customerId, callerIp)
+	err := service.Recharge(referenceId, customerId, callerIp, paid)
 	if err != nil {
+		if service.IsPaymentAmountRejected(err) {
+			logger.LogWarn(ctx, common.LogText("Stripe top-up settlement rejected by amount reconciliation trade_no=%s event_type=%s client_ip=%s reason=%q", referenceId, string(event.Type), callerIp, err.Error()))
+			return stripeSettlementRejected
+		}
 		logger.LogError(ctx, common.LogText("Stripe top-up processing failed trade_no=%s event_type=%s client_ip=%s error=%q", referenceId, string(event.Type), callerIp, err.Error()))
-		return
+		return stripeSettlementRetryable
 	}
 
 	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
 	currency := strings.ToUpper(event.GetObjectValue("currency"))
 	logger.LogInfo(ctx, common.LogText("Stripe top-up succeeded trade_no=%s amount_total=%.2f currency=%s event_type=%s client_ip=%s", referenceId, total/100, currency, string(event.Type), callerIp))
+	return stripeSettlementSettled
 }
 
 func sessionExpired(ctx context.Context, event stripe.Event) {

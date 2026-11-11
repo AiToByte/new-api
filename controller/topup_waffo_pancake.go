@@ -388,6 +388,8 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// 记录下单时服务端确定的实付金额，供回调结算前对账。
+	topUp.SetExpectedPayment(formatWaffoPancakeAmount(payMoney), "", "")
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake failed to create top-up order user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
 		paymentError(c, common.NewMessage("Failed to create order"))
@@ -497,7 +499,7 @@ func WaffoPancakeWebhook(c *gin.Context) {
 		}
 		LockOrder(tradeNo)
 		defer UnlockOrder(tradeNo)
-		if err := service.CompleteSubscriptionOrder(tradeNo, string(bodyBytes), model.PaymentProviderWaffoPancake, ""); err != nil {
+		if err := service.CompleteSubscriptionOrder(tradeNo, string(bodyBytes), model.PaymentProviderWaffoPancake, "", waffoPancakePaidAmount(event)); err != nil {
 			logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake subscription completion failed trade_no=%s event_id=%s order_id=%s client_ip=%s error=%q", tradeNo, event.ID, event.Data.OrderID, c.ClientIP(), err.Error()))
 			c.String(http.StatusInternalServerError, "retry")
 			return
@@ -523,7 +525,7 @@ func WaffoPancakeWebhook(c *gin.Context) {
 	LockOrder(tradeNo)
 	defer UnlockOrder(tradeNo)
 
-	if err := service.RechargeWaffoPancake(tradeNo); err != nil {
+	if err := service.RechargeWaffoPancake(tradeNo, waffoPancakePaidAmount(event)); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake top-up processing failed trade_no=%s event_id=%s order_id=%s client_ip=%s error=%q", tradeNo, event.ID, event.Data.OrderID, c.ClientIP(), err.Error()))
 		c.String(http.StatusInternalServerError, "retry")
 		return
@@ -531,4 +533,11 @@ func WaffoPancakeWebhook(c *gin.Context) {
 
 	logger.LogInfo(c.Request.Context(), common.LogText("Waffo Pancake top-up succeeded trade_no=%s event_id=%s order_id=%s client_ip=%s", tradeNo, event.ID, event.Data.OrderID, c.ClientIP()))
 	c.String(http.StatusOK, "OK")
+}
+
+// waffoPancakePaidAmount 从已验签的 Pancake 事件提取实付金额。
+// Data.Amount 为主单位字符串，Data.Currency 为 ISO 4217。
+// 该事件不携带商品 ID，价格绑定由订阅订单侧的 ExpectedPriceID 留空处理。
+func waffoPancakePaidAmount(event *service.WaffoPancakeWebhookEvent) *service.PaidAmount {
+	return service.ParsePaidAmountMajor(event.Data.Amount, event.Data.Currency, "")
 }

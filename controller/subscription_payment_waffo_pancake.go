@@ -89,6 +89,8 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// Pancake 订阅由渠道侧商品定价，不写金额快照；绑定商品 ID。
+	order.SetExpectedPayment("", strings.ToUpper(strings.TrimSpace(plan.Currency)), plan.WaffoPancakeProductId)
 	if err := order.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo Pancake failed to create subscription order user_id=%d plan_id=%d trade_no=%s error=%q", userId, plan.Id, tradeNo, err.Error()))
 		paymentError(c, common.NewMessage("Failed to create order"))

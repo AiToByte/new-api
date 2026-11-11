@@ -23,6 +23,16 @@ type TopUp struct {
 	CreateTime      int64   `json:"create_time"`
 	CompleteTime    int64   `json:"complete_time"`
 	Status          string  `json:"status"`
+
+	// 下单时由服务端计算的「期望实付金额」快照，主单位十进制字符串。
+	// 支付回调只按 Money 入账，历史上不核对渠道实付金额；该字段用于
+	// 结算前对账，防止 0 元/金额不符的已验签回调全额入账。
+	// 空字符串表示历史订单（升级前创建）没有快照，只做保守校验。
+	ExpectedAmount string `json:"expected_amount" gorm:"type:varchar(32);default:''"`
+	// 期望币种（ISO 4217，大写）。空表示不校验币种。
+	ExpectedCurrency string `json:"expected_currency" gorm:"type:varchar(8);default:''"`
+	// 期望的渠道价格/商品标识，可选，用于绑定具体商品。
+	ExpectedPriceID string `json:"expected_price_id" gorm:"type:varchar(128);default:''"`
 }
 
 const (

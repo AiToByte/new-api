@@ -225,6 +225,15 @@ type SubscriptionOrder struct {
 	CompleteTime    int64  `json:"complete_time"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
+
+	// 下单时由订阅计划确定的「期望实付金额」快照，主单位十进制字符串。
+	// 与 TopUp.ExpectedAmount 同语义：支付回调结算前必须核对渠道实付金额，
+	// 防止 0 元/金额不符的已验签回调开通订阅。空字符串表示历史订单无快照。
+	ExpectedAmount string `json:"expected_amount" gorm:"type:varchar(32);default:''"`
+	// 期望币种来自 SubscriptionPlan.Currency（ISO 4217，大写）。
+	ExpectedCurrency string `json:"expected_currency" gorm:"type:varchar(8);default:''"`
+	// 期望的渠道价格/商品标识（StripePriceId / CreemProductId / ...）。
+	ExpectedPriceID string `json:"expected_price_id" gorm:"type:varchar(128);default:''"`
 }
 
 func (o *SubscriptionOrder) Insert() error {

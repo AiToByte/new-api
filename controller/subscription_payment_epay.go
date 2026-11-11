@@ -95,6 +95,9 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// 易支付订阅的金额由服务端提交（见下方 Purchase 的 Money 参数），
+	// 与回调 verifyInfo.Money 同源，因此可写入精确金额快照。
+	order.SetExpectedPayment(strconv.FormatFloat(plan.PriceAmount, 'f', 2, 64), "", "")
 	if err := order.Insert(); err != nil {
 		common.ApiErrorT(c, "Failed to create order")
 		return
@@ -170,7 +173,8 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 
-	if err := service.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+	if err := service.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type,
+		service.ParsePaidAmountMajor(verifyInfo.Money, "", "")); err != nil {
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -227,7 +231,8 @@ func SubscriptionEpayReturn(c *gin.Context) {
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		if err := service.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+		if err := service.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type,
+			service.ParsePaidAmountMajor(verifyInfo.Money, "", "")); err != nil {
 			c.Redirect(http.StatusFound, service.PaymentReturnPath("/wallet?pay=fail"))
 			return
 		}

@@ -231,6 +231,8 @@ func RequestWaffoPay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// 记录下单时服务端确定的实付金额，供回调结算前对账。
+	topUp.SetExpectedPayment(formatWaffoAmount(payMoney, getWaffoCurrency()), getWaffoCurrency(), "")
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo failed to create top-up order user_id=%d trade_no=%s amount=%d error=%q", id, merchantOrderId, req.Amount, err.Error()))
 		paymentError(c, common.NewMessage("Failed to create order"))
@@ -411,7 +413,7 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 	LockOrder(merchantOrderId)
 	defer UnlockOrder(merchantOrderId)
 
-	if err := service.RechargeWaffo(merchantOrderId, c.ClientIP()); err != nil {
+	if err := service.RechargeWaffo(merchantOrderId, c.ClientIP(), waffoPaidAmount(result)); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Waffo top-up processing failed trade_no=%s client_ip=%s error=%q", merchantOrderId, c.ClientIP(), err.Error()))
 		sendWaffoWebhookResponse(c, wh, false, err.Error())
 		return
@@ -431,4 +433,16 @@ func sendWaffoWebhookResponse(c *gin.Context, wh *core.WebhookHandler, success b
 	}
 	c.Header("X-SIGNATURE", sig)
 	c.Data(http.StatusOK, "application/json", []byte(body))
+}
+
+// waffoPaidAmount 从已验签的 Waffo 事件提取实付金额。
+// OrderAmount 是服务端下单时传给渠道的金额，与订单金额快照同源，优先使用；
+// FinalDealAmount 可能包含渠道侧折扣或汇率换算，直接比对会误拒正常付款，
+// 仅在 OrderAmount 缺失时作为退路。二者都是主单位字符串。
+func waffoPaidAmount(result *core.PaymentNotificationResult) *service.PaidAmount {
+	raw := strings.TrimSpace(result.OrderAmount)
+	if raw == "" {
+		raw = strings.TrimSpace(result.FinalDealAmount)
+	}
+	return service.ParsePaidAmountMajor(raw, result.OrderCurrency, "")
 }

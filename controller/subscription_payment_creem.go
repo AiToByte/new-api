@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -95,6 +96,9 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	// Creem 订阅由渠道侧 Product 定价，不写金额快照；绑定商品 ID，
+	// 防止用低价商品的已验签付款结算本订单。
+	order.SetExpectedPayment("", strings.ToUpper(strings.TrimSpace(plan.Currency)), plan.CreemProductId)
 	if err := order.Insert(); err != nil {
 		paymentError(c, common.NewMessage("Failed to create order"))
 		return
