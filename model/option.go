@@ -220,9 +220,11 @@ func loadOptionsFromDatabase() {
 	applyPasskeyDomainOptions(passkeyOptions)
 }
 
+// SyncOptions 周期性把配置从数据库同步到内存。
+// 间隔带错峰抖动，避免多实例同频全表读主库形成尖峰。
 func SyncOptions(frequency int) {
 	for {
-		time.Sleep(time.Duration(frequency) * time.Second)
+		time.Sleep(common.PeriodicSyncInterval(time.Duration(frequency) * time.Second))
 		common.SysLog(common.LogText("syncing options from database"))
 		loadOptionsFromDatabase()
 	}

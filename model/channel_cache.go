@@ -106,9 +106,11 @@ func InitChannelCache() {
 	common.SysLog(common.LogText("channels synced from database"))
 }
 
+// SyncChannelCache 周期性从数据库重建渠道内存缓存。
+// 间隔带错峰抖动，避免多实例在同一瞬间一起执行全表 Find 打满主库。
 func SyncChannelCache(frequency int) {
 	for {
-		time.Sleep(time.Duration(frequency) * time.Second)
+		time.Sleep(common.PeriodicSyncInterval(time.Duration(frequency) * time.Second))
 		common.SysLog(common.LogText("syncing channels from database"))
 		InitChannelCache()
 	}

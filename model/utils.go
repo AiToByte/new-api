@@ -34,7 +34,8 @@ func init() {
 func InitBatchUpdater() {
 	gopool.Go(func() {
 		for {
-			time.Sleep(time.Duration(common.BatchUpdateInterval) * time.Second)
+			// 错峰抖动：批量落库在多实例部署下不应同时触发。
+			time.Sleep(common.PeriodicSyncInterval(time.Duration(common.BatchUpdateInterval) * time.Second))
 			batchUpdate()
 		}
 	})

@@ -195,6 +195,13 @@ func SyncTaskPluginsOnce() error {
 
 // SyncTaskPlugins runs the periodic background sync loop. Failures are logged
 // and surfaced through the tracker; the loop keeps running.
+// SyncTaskPlugins 启动时立即同步一次，随后周期性同步插件运行状态。
+//
+// ticker 显式创建并 defer Stop，避免定时器资源在函数退出路径上泄漏；
+// 每轮间隔带错峰抖动，防止多实例在同一瞬间一起全表扫描插件表与主库。
+// 注意：本函数由 main.go 以 go 协程启动，随进程生命周期常驻；真正的
+// 优雅关停需要调用方传入 context 并在此监听取消，属后续架构改动，
+// 本次只解决可观测的定时器泄漏与同频尖峰，不改变启动/同步语义。
 func SyncTaskPlugins() {
 	syncOnce := func() {
 		if err := SyncTaskPluginsOnce(); err != nil {
@@ -202,7 +209,10 @@ func SyncTaskPlugins() {
 		}
 	}
 	syncOnce()
-	for range time.NewTicker(30 * time.Second).C {
+
+	const baseInterval = 30 * time.Second
+	for {
+		time.Sleep(common.PeriodicSyncInterval(baseInterval))
 		syncOnce()
 	}
 }
