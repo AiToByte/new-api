@@ -55,13 +55,28 @@ func resolveUpstreams(c *gin.Context, req dto.UpstreamRequest) ([]dto.UpstreamDT
 
 	if len(req.Upstreams) > 0 {
 		for _, u := range req.Upstreams {
-			if strings.HasPrefix(u.BaseURL, "http") {
-				if u.Endpoint == "" {
-					u.Endpoint = service.DefaultEndpoint
-				}
-				u.BaseURL = strings.TrimRight(u.BaseURL, "/")
-				upstreams = append(upstreams, u)
+			if !strings.HasPrefix(u.BaseURL, "http") {
+				continue
 			}
+			// 请求体显式提供的 upstream 属于「调用方可控外发目标」：
+			// BaseURL 与 Endpoint（可为完整 http(s) URL）都必须经过统一 SSRF
+			// 校验，否则可借 root 会话探测云元数据/内网服务并回显状态。
+			// 从数据库渠道读取的 BaseURL 不在此校验范围内——那是管理员配置的
+			// 部署目标，项目允许其指向内网/私有链路（见 service/http_client.go）。
+			for _, candidate := range []string{u.BaseURL, u.Endpoint} {
+				if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
+					continue
+				}
+				if err := service.ValidateSSRFProtectedFetchURL(candidate); err != nil {
+					common.ApiErrorT(c, "Upstream URL is not allowed by the server's fetch policy")
+					return nil, false
+				}
+			}
+			if u.Endpoint == "" {
+				u.Endpoint = service.DefaultEndpoint
+			}
+			u.BaseURL = strings.TrimRight(u.BaseURL, "/")
+			upstreams = append(upstreams, u)
 		}
 	} else if len(req.ChannelIDs) > 0 {
 		intIds := make([]int, 0, len(req.ChannelIDs))

@@ -159,6 +159,15 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid Discovery URL. Only http and https are supported")
 		return
 	}
+	// Discovery URL 由请求体直接提供，属于用户可控外发目标。必须走统一的
+	// SSRF 校验：否则 root 可让服务器请求云元数据、内网服务，并把上游错误体
+	// 与 discovery JSON 原样回显，形成凭据外带与内网探测。
+	// 校验在建立连接之前完成，拨号阶段还有一层 IP 校验防 DNS rebinding；
+	// 防护开关与白名单由系统 fetch 设置统一管理。
+	if err := service.ValidateSSRFProtectedFetchURL(targetURL); err != nil {
+		common.ApiErrorT(c, "Discovery URL is not allowed by the server's fetch policy")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
@@ -170,7 +179,8 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 	}
 	httpReq.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	// 使用带拨号时 IP 校验且禁止重定向逃逸到内网的目标客户端。
+	client := service.GetSSRFProtectedHTTPClient()
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		common.ApiErrorT(c, "Failed to fetch the Discovery configuration: {{error}}", map[string]any{"error": err.Error()})

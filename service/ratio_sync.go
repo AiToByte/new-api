@@ -710,15 +710,12 @@ type UpstreamRatioSyncResult struct {
 // models.dev), and diffs the normalized result against local pricing settings.
 // Callers resolve which upstreams to hit; this owns the transport, parsing and
 // diffing pipeline.
-func FetchUpstreamRatios(ctx context.Context, upstreams []dto.UpstreamDTO, timeoutSeconds int) (*UpstreamRatioSyncResult, error) {
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = DefaultTimeoutSeconds
-	}
-	var wg sync.WaitGroup
-	ch := make(chan upstreamResult, len(upstreams))
-
-	sem := make(chan struct{}, maxConcurrentFetches)
-
+// newRatioSyncHTTPClient 构建倍率同步的外发客户端。
+//
+// 单独抽出构造逻辑，让「禁止重定向逃逸」这一安全约束可被直接回归测试，
+// 而不是散落在 FetchUpstreamRatios 的长函数里。transport 保留 github.io
+// 的 IPv4 优先拨号（该域名 IPv6 常不可用），其余拨号走默认策略。
+func newRatioSyncHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	transport := &http.Transport{MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ExpectContinueTimeout: 1 * time.Second, ResponseHeaderTimeout: 10 * time.Second}
 	if common.TLSInsecureSkipVerify {
@@ -729,7 +726,7 @@ func FetchUpstreamRatios(ctx context.Context, upstreams []dto.UpstreamDTO, timeo
 		if err != nil {
 			host = addr
 		}
-		// 对 github.io 优先尝试 IPv4，失败则回退 IPv6
+		// 对 github.io 优先尝试 IPv4，失败则回退 IPv6。
 		if strings.HasSuffix(host, "github.io") {
 			if conn, err := dialer.DialContext(ctx, "tcp4", addr); err == nil {
 				return conn, nil
@@ -738,7 +735,23 @@ func FetchUpstreamRatios(ctx context.Context, upstreams []dto.UpstreamDTO, timeo
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
-	client := &http.Client{Transport: transport}
+	return &http.Client{Transport: transport, CheckRedirect: checkProtectedFetchRedirect}
+}
+
+func FetchUpstreamRatios(ctx context.Context, upstreams []dto.UpstreamDTO, timeoutSeconds int) (*UpstreamRatioSyncResult, error) {
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = DefaultTimeoutSeconds
+	}
+	var wg sync.WaitGroup
+	ch := make(chan upstreamResult, len(upstreams))
+
+	// 并发上限：避免一次性对大量上游同时发起请求打满连接池。
+	sem := make(chan struct{}, maxConcurrentFetches)
+
+	// 禁止重定向逃逸：即使初始 URL 通过了校验（或来自管理员配置的渠道
+	// BaseURL），上游 302 到内网/元数据地址也必须被拒绝。此处复用统一的
+	// 受保护重定向策略，同时保留 github.io 的 IPv4 优先拨号逻辑。
+	client := newRatioSyncHTTPClient()
 
 	for _, chn := range upstreams {
 		wg.Add(1)
