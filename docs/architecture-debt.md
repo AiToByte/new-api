@@ -453,6 +453,21 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - 依据：OWASP Authentication Cheat Sheet（敏感操作重认证、凭据轮换、认证事件日志不记密钥）、Session Management Cheat Sheet（特权变更后会话 ID 更新/销毁、服务端强制失效、日志用盐哈希关联而非原始凭据）、项目 AGENTS.md 的 OWASP 强制条款。
 - 新增测试：`service/payment_reconciliation_test.go`（0 元拒绝、金额/币种/商品不符、合法付款、无快照与缺金额字段的向后兼容）、`controller/stripe_amount_test.go`（0 元券事件解析、分→主单位换算、缺字段不阻断、结算结果分类）、`common/log_safety_test.go`（指纹确定性/不泄露/空值）。
 - `gofmt`/`go build ./...`/`go vet` 全绿；定向支付回归全绿。
+- **终版验证（2026-11-11，遵守本机资源最小化约束）**：不启动 Docker 中间件，采用
+  `GOMAXPROCS=2 GOWORK=off go test -p 1 ./service/ ./common/ ./controller/ -run '<支付相关定向用例>' -count=1`
+  —— **service 0.430s / common 0.379s / controller 0.692s，零失败**。覆盖新增的金额对账、
+  日志指纹、0 元券、结算结果分类、五渠道 webhook 门禁、Epay 回调验签守卫、兑换码批量删除。
+  已移除 `newapi-test-*` 容器释放磁盘。
+- **资源约束（用户明确要求，后续遵循）**：本机 Docker 配置有限，运行组件/中间件/构建时
+  务必最小化资源。因此：① 默认跑 sqlite-only 定向子集（无需 Docker），并加
+  `GOMAXPROCS=2 -p 1` 限制并行；② 三方言矩阵仅在必要时按需启动 `mysql:8`/`postgres:15`
+  两个容器（端口 13306/15432），用完立即 `docker rm -f`；③ 不并发跑多个全量回归
+  （曾出现 SQLite 文件锁与容器残留导致的假失败）；④ 三方言全量的金标准以 CI（Linux）为准。
+- 三方言口径说明：未设置 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN` 时 mysql/postgres 子测试静默
+  skip，因此**本次定向验证仅覆盖 sqlite 分支**；三方言真跑需带 DSN（历史实证见 8.3）。
+- 一次环境假失败记录：容器 `docker start` 复用旧数据卷时，`TestDeleteRedemptionBatch` 的
+  「use an empty test database」断言失败、`TestSecurityAccountDeletionConcurrentRequests`
+  受 SQLite 锁影响；重建全新容器后两用例 1.757s 全过，确认为环境而非代码回归。
 
 #### 未决项（不擅自改动，需产品决策或前后端协同）
 
