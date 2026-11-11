@@ -475,3 +475,43 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - **#6 改密不撤 PAT/relay token**：`service/auth_session.go:212` 明示 token 保持有效；OWASP 两份 Cheat Sheet 均未强制「改密后全局撤销所有 token」（Session Management 明列为 coverage gap，仅要求会话 ID 更新/销毁与重认证）。且 relay token 是 API 网关核心凭据，全局撤销是产品级决策，需评估业务影响。当前缓解：`auth_version` 递增使浏览器会话失效；软/硬删用户会删 PAT 并清缓存；禁用用户被 Status 拒。
 - **P1 性能**（本次未改）：`channel_cache.go:129` 全局读锁覆盖整段选渠道 + 写方三重循环；`model/log.go:101` 每请求同步 INSERT；后台 goroutine/ticker 无 context；`model/channel.go:446` SearchChannels 内存分页（3.6 既有项）。
 - **P1 SSRF**：项目已有 `common/ssrf_protection.go`/`service/protected_fetch_client.go`，但 `custom_oauth.go:157`、`service/ratio_sync.go:741`、`service/uptime_kuma.go:146` 的管理员/匿名外发请求未复用（均 RootAuth 或匿名可达，需单独设计）。
+
+### 8.5 P1 轮：SSRF 收敛与后台周期任务错峰（2026-11-11）
+
+延续 §8.4 未决的 P1 项。全程遵守资源最小化约束：**零 Docker、GOMAXPROCS=2、-p 1、sqlite-only 定向验证**。
+
+| 提交 | 内容 |
+|---|---|
+| `07589bd7e` | 三处 SSRF 绕过收敛 |
+| `0819ed0ca` | 后台周期任务错峰抖动 + ticker 生命周期 |
+
+#### SSRF：精确区分「用户可控 URL」与「operator-managed 目标」
+
+项目已有完整防护（`common/ssrf_protection.go`、`service/protected_fetch_client.go`：`ValidateSSRFProtectedFetchURL` 做 URL 层校验，受保护 client 在拨号层做 IP 校验 + 重定向校验），但三处外发请求绕过了它。本次不另造轮子，只做接线与边界划分：
+
+- `controller/custom_oauth.go:157`（RootAuth，discovery URL 由请求体直接给出，且回显上游错误体与 JSON）：**最严重的绕过**。现在先 `ValidateSSRFProtectedFetchURL`，再用 `GetSSRFProtectedHTTPClient()` 发请求（拨号层 IP 校验 + 禁重定向）。
+- `service/ratio_sync.go:741` + `controller/ratio_sync.go:58`（RootAuth，请求体的 BaseURL 与 Endpoint 可为任意 http(s) URL）：在 `resolveUpstreams` 里对**请求体显式 upstreams** 逐个校验；从数据库渠道读取的 BaseURL **刻意不校验**——那是管理员配置的部署目标，`service/http_client.go:146-152` 明确说明其可能合法指向内网/私有链路/本地代理，一刀切会误伤现网部署。
+- `service/uptime_kuma.go:146`（`/api/uptime/status` 匿名可达，URL 由管理员在控制台配置，默认 client 跟随重定向）：初始目标保持可达（管理员可能自建在内网），但**禁止重定向逃逸**到内网/云元数据。
+
+三处外发客户端统一挂 `checkProtectedFetchRedirect`。为避免后续重构悄悄退回裸 client，抽出 `newRatioSyncHTTPClient()` / `newUptimeKumaHTTPClient()` 并加回归测试锁定 `CheckRedirect`。同时修掉 `GetSSRFProtectedHTTPClient()` 在 `InitHttpClient()` 之前被调用时返回 nil 导致 `client.Do` panic 的健壮性缺陷（惰性构造兜底，不写回全局变量以免与启动初始化/测试替换产生竞态）。
+
+测试全部离线（httptest，无公网、无 Docker）：内网/元数据 IP 被拒、放行路径能解析 discovery JSON、协议白名单、重定向逃逸被拦、两个 client 均保留 `CheckRedirect`。
+
+#### 性能：错峰抖动（零行为破坏）
+
+- 新增 `common/periodic_sync.go`：`PeriodicSyncInterval(base)` 返回 ±10% 对称抖动（`math/rand/v2` 包级函数并发安全、无需播种），并对非正 base 做防护避免 `Sleep(0)` 忙循环打满 CPU。
+- 接入 `SyncChannelCache` / `SyncOptions` / `InitBatchUpdater` / `SyncTaskPlugins`：多实例不再在同一瞬间一起全表扫描主库，把周期性尖峰摊平；平均同步频率不变。
+- `SyncTaskPlugins` 原 `for range time.NewTicker(30*time.Second).C` 的 ticker 从未 Stop 且无退出路径，改为显式间隔循环。**优雅关停需要调用方传 context，属后续架构改动，已在代码注释中标明**，本次不改启动/立即同步语义。
+
+#### 仍然未改的高风险性能项（仅给方案）
+
+- `model/channel_cache.go:129`：全局 `channelSyncLock.RLock()` 覆盖整段 `GetRandomSatisfiedChannel`，写方 `CacheUpdateChannelStatus:265-282` 持写锁三重循环遍历全 `group2model2channels`。auto-ban 时所有请求串行阻塞。方案：改为 `atomic.Value` 不可变快照或按 group 分片锁；涉及缓存一致性与既有锁顺序死锁约束（`InvalidatePricingCache` / `updatePricingLock`），需独立设计与压测。
+- `model/log.go:101`：开消费日志时每请求同步 `LOG_DB.Create` + 2~3 次查库。方案：有界异步队列 + `CreateInBatches` + TTL 分区；会改变日志可靠性语义（可能丢日志），需产品确认。
+- `model/channel.go:446` + `controller/channel.go:368-419`：SearchChannels 在 Go 里全量加载后过滤/切片分页（台账 3.6 既有项）。方案：把 status/type 过滤、COUNT、LIMIT/OFFSET 全部下推 SQL，需覆盖三方言与 tag 分支。
+- `common/rate-limit.go:95`：InMemoryRateLimiter 的过期清理 ticker 随 limiter 生命周期常驻、无 Stop；与 limiter 销毁流程绑定，需一并设计。
+
+#### 验证
+
+- `gofmt -l` 无输出；`go build ./...` EXIT=0；`go vet ./controller/ ./service/ ./model/ ./common/` EXIT=0。
+- 定向回归（零 Docker）：common 0.189s / service 0.320s / controller 0.458s，零失败；model 无匹配用例。
+- 口径说明：未带 DSN，mysql/postgres 子测试静默 skip，本次仅覆盖 sqlite 分支。
