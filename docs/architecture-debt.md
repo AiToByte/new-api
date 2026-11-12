@@ -227,8 +227,9 @@ gin 1.9.1 与 Go 1.26 存在版本落差。**升级属独立提案**，须按 `A
   - 环境注：controller 全量在 Windows 本机本就 105 失败（SQLite 文件锁，干净树复现），与改动无关；看门禁以 CI（Linux）为准。
 - [x] **3.4**（2026-10）：`UpdateSelf`（145 行）拆为路由内分派 + `UpdateSelfRequest` 类型化 DTO + 三个命名函数（`updateSelfPassword` / `updateSelfSetting` 闭包复用 / `updateSelfProfile`），消灭 map→marshal→unmarshal 回环。**有意不拆三个路由**：前端存在 profile+password 混合单请求（`acceptAuthRotation: Boolean(data.password)`），拆路由会逼出多调用+proof 杂耍并破坏第三方兼容；安全语义（step-up proof、session rotation）原位保留。已核对的边缘：`password:null/""` 视为未请求、`password:123` 解码 400（与旧 remarshal 失败同码）、null 设置键落 profile 空操作（struct-update 跳零值，无 wipe 风险）、超长 email/remark 不再 400（本就丢弃的字段）。新增 `controller/update_self_test.go` 分发表（5 用例）+ 既有 5 个安全测试断言全绿（仅 Windows 文件锁清理失败）。
 - [x] **3.5**（2026-10）：普查后采用**薄封装而非搬函数**——记账逻辑与事务同处 model 是良好内聚，真正要修的只是调用方向。新增 `service/payment_fulfillment.go`（6 个透传：4×Recharge + Purchase/Complete），7 文件 10 处 controller 调用改道；`TryReserveUserQuota/TokenQuota` 核实早已在 service 内部调用，无需动。合规：billing.md 已在 Phase 2 通读，本次只改调用路径、零算术变更；model 钱测试（exactly-once/redis-DB 对账/溢出上限等 10 项）全绿。
-- [ ] **3.6** 消除 D4 列出的两处真实重复规则
+- [x] **3.6** 消除 D4 列出的两处真实重复规则（2026-11-12 结项）
   - SearchChannels 内存分页设计要点（2026-10-21 只读分析）：handler 两支数据源——tag 模式「按 tag 分批查库 + 按原 tag 序内存重组」与普通模式「`model.SearchChannels` 单次查库」——汇入同一套「status 过滤 → type 统计 → type 过滤 → 内存分页」。`model.SearchChannels` 不带 LIMIT（返回全量匹配集），故内存分页是对全量切片。三个过滤条件（status/type/分页）均为纯列谓词、可下沉 SQL，但 tag 模式的多源特性决定：要么先把两支统一为「取全量候选 → 统一过滤/分页」管道，要么接受 tag 支维持内存分页。属需专门设计的项，本批未擅动。
+  - **结项实现（`6866ca61e`）**：采用「普通模式完整下推 + tag 模式保留重组但下推过滤」的取舍。新增 `model/channel_search.go`：`NewChannelSearchQuery`（可组合查询，含与旧实现逐字相同的搜索谓词 + group/status/type 过滤 + `Omit("key")`）、`ChannelTypeCounts`（GROUP BY type）；方言列名自行判定，不再依赖 `initCol()` 启动顺序。普通模式改为 SQL `Count` + `Group(type)` + `Limit/Offset`，只加载当前页；tag 模式因「tag 顺序来自排序子查询、跨三方言无法用可移植 ORDER BY 表达」保留重组与内存分页，但 status/type 过滤下推以减少加载。响应 `items`/`total`/`type_counts` 语义保真，特别是 `type_counts` 基于「不含 type 过滤」的查询（与 `GetAllChannels` 一致）。`model.SearchChannels` 改为委托共享查询构造器，`SearchTags` 复用同一方言列名 helper，消除两套谓词。详见 §8.6。
 
 **验收**：controller 中 `model.DB` 直调归零；不 import service 的文件 40 → 个位数。
 
@@ -515,3 +516,47 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - `gofmt -l` 无输出；`go build ./...` EXIT=0；`go vet ./controller/ ./service/ ./model/ ./common/` EXIT=0。
 - 定向回归（零 Docker）：common 0.189s / service 0.320s / controller 0.458s，零失败；model 无匹配用例。
 - 口径说明：未带 DSN，mysql/postgres 子测试静默 skip，本次仅覆盖 sqlite 分支。
+
+### 8.6 3.6 结项：SearchChannels 过滤/统计/分页下沉 SQL（2026-11-12）
+
+延续 §8.5 未改的高风险性能项。用户资源约束继续生效：**零 Docker、GOMAXPROCS=2、-p 1、sqlite-only 定向验证**。
+
+提交 `6866ca61e`。
+
+#### 问题
+
+`controller.SearchChannels` 先把匹配渠道全量查进内存（含 `key`、`settings`、`param_override` 等大字段），再在 Go 里做 status 过滤 → type 统计 → type 过滤 → 切片分页。渠道数千时，后台列表每次轮询都是 O(N) 全表加载与分配，成为内存/GC 与主库压力源。`model.SearchChannels` 与 `SearchTags` 还各自维护一份相同的方言列名与搜索谓词，属 D4 登记的重复规则。
+
+#### 实现
+
+- `model/channel_search.go`：
+  - `NewChannelSearchQuery(keyword, group, modelKeyword, statusFilter, typeFilter)` 返回可组合查询，谓词与旧 `SearchChannels` 逐字一致（id/name/key/base_url 模糊或精确匹配 + models LIKE + group 过滤），叠加 status/type 纯列谓词，恒定 `Omit("key")`。
+  - `ChannelTypeCounts` 暴露 `GROUP BY type`，供前端筛选器计数。
+  - `channelSearchColumns()` 自行判定 PostgreSQL 双引号列名，**不复用 `commonKeyCol` 等依赖 `initCol()` 启动顺序的包级变量**，消除早期调用/测试构造空列名导致 SQL 语法错误的隐患；判定逻辑与 `initCol()` 完全一致。
+- `controller.SearchChannels`：
+  - **普通模式（默认高频路径）**：`Count` 取 total、`Group(type)` 取 type_counts、`Limit+Offset` 取当前页，只把一页 Channel 读进内存。
+  - **tag 模式**：保留「按 `SearchTags` 顺序重组」与内存分页——tag 顺序来自带排序的子查询，跨 SQLite/MySQL/PostgreSQL 无法用一条可移植 `ORDER BY` 表达，强行统一会改变返回顺序；但把 status/type 过滤下推到候选查询，显著减少加载行数。这是台账 3.6 明确列出的两种取舍之一，已在代码注释中写明理由。
+  - 提前解析 type/page/pageSize，使全部谓词可在 SQL 层完成。
+- 去重：`model.SearchChannels` 改为委托 `NewChannelSearchQuery`（保留导出 API 供确有全量需求的调用方，并注明不得用于请求热路径）；`SearchTags` 复用 `channelSearchColumns()`。
+
+#### 行为保真点（最容易踩坑）
+
+- `type_counts` 必须基于**不含 type 过滤**的查询：旧内存实现是「先统计、后按 type 过滤」，`GetAllChannels` 的 `countQuery := NewChannelListQuery(group, statusFilter, -1)` 也是同样语义。若误用带 type 过滤的查询，切换筛选器时计数会跳变。
+- `total` 是 type 过滤后的总数；超出范围的页返回空 items 但 total 不变（旧实现 `startIdx = min(..., total)` 的语义由 SQL Offset 天然保证）。
+- `Omit("key")` 必须保留，渠道密钥不得进入内存或响应。
+- 排序仍由 `sortOptions.Apply` 施加；`NewChannelSortOptions(..., idSort)` 已含 IDSort，与旧 `resolveChannelSortOptions` 等价。
+- status 语义：`-1` 全部、`1` 仅启用、`0` 仅停用（`status != enabled`），沿用既有 `applyChannelStatusFilter`，与内存过滤逐条等价。
+
+#### 测试（sqlite `:memory:`，零 Docker、零公网）
+
+- model 层 `channel_search_test.go`：过滤计数矩阵、分页（首页/次页/越界页）、priority 排序、`Omit("key")`、关键词与模型谓词、`ChannelTypeCounts` 不受 type 过滤影响。
+- controller 层 `channel_search_test.go`：handler 级响应断言——分页 items 顺序与 total、status/type 组合过滤、`type_counts` 不变性、关键词搜索、tag 模式分组顺序与过滤、响应绝不泄露 key。
+- 最终定向回归：model 0.272s / controller 0.444s / service 0.325s / common 0.160s，零失败；`gofmt`/`go build ./...`/`go vet` 全绿。
+
+#### 仍待办的高风险性能项（未改）
+
+`model/channel_cache.go:129` 全局读锁覆盖整段选渠道（`atomic.Value` 快照 / 按 group 分片锁）、`model/log.go:101` 每请求同步 INSERT（有界异步队列，会改变日志可靠性语义）、`common/rate-limit.go:95` 清理 ticker 生命周期。
+
+#### 口径说明
+
+未带 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN`，mysql/postgres 子测试静默 skip，本次仅覆盖 sqlite 分支；新查询的方言差异集中在 `channelSearchColumns()`，三方言金标准仍以 CI（Linux）为准。
