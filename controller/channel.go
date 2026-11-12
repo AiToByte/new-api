@@ -322,8 +322,36 @@ func SearchChannels(c *gin.Context) {
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	sortOptions := model.NewChannelSortOptions(c.Query("sort_by"), c.Query("sort_order"), idSort)
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
-	channelData := make([]*model.Channel, 0)
+
+	// 提前解析 type 与分页参数，使过滤/统计/分页都能在 SQL 层完成。
+	// 语义保持：type_counts 基于「status 过滤后、type 过滤前」的集合，
+	// 与 GetAllChannels 一致，因此切换 type 筛选时计数不跳变。
+	typeParam := c.Query("type")
+	typeFilter := -1
+	if typeParam != "" {
+		if tp, err := strconv.Atoi(typeParam); err == nil {
+			typeFilter = tp
+		}
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	startIdx := (page - 1) * pageSize
+
+	var channelData []*model.Channel
+	var total int64
+	typeCounts := make(map[int64]int64)
+
 	if enableTagMode {
+		// tag 模式按「SearchTags 返回的 tag 顺序」重组渠道，这个顺序依赖
+		// 子查询的 priority/id 排序，跨 SQLite/MySQL/PostgreSQL 无法用一条
+		// 简单 ORDER BY 表达，因此保留内存重组与分页（台账 3.6 的既定取舍）。
+		// 但 status/type 是纯列谓词，下推到候选查询可显著减少加载量。
 		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
 		if err != nil {
 			common.ApiError(c, err)
@@ -335,88 +363,81 @@ func SearchChannels(c *gin.Context) {
 				tagNames = append(tagNames, *tag)
 			}
 		}
+
 		if len(tagNames) > 0 {
+			// 先按 tag 分批查库（每批各自应用 sortOptions），再按原 tag 序重组。
+			// 复用 NewChannelListQuery 以统一 group/status 过滤语义。
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(model.NewChannelListQuery(group, -1, -1).Where("tag IN ?", tagNames)).
+			err := sortOptions.Apply(model.NewChannelListQuery(group, statusFilter, typeFilter).
+				Where("tag IN ?", tagNames)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
-			// Restore the original per-tag grouping so the in-memory
-			// pagination below sees the same order as before.
 			grouped := make(map[string][]*model.Channel, len(tagNames))
 			for _, ch := range tagChannels {
 				if ch.Tag != nil {
 					grouped[*ch.Tag] = append(grouped[*ch.Tag], ch)
 				}
 			}
+			channelData = make([]*model.Channel, 0, len(tagChannels))
 			for _, name := range tagNames {
 				channelData = append(channelData, grouped[name]...)
 			}
+
+			// type_counts 不含 type 过滤，与旧内存实现（先统计后过滤）一致。
+			var counts []model.ChannelTypeCount
+			if err := model.ChannelTypeCounts(model.NewChannelListQuery(group, statusFilter, -1).
+				Where("tag IN ?", tagNames), &counts); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			for _, r := range counts {
+				typeCounts[r.Type] = r.Count
+			}
 		}
+		total = int64(len(channelData))
 	} else {
-		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort, sortOptions)
-		if err != nil {
+		// 普通模式：把 status/type 过滤、COUNT、分组统计、分页全部下推 SQL，
+		// 只把「当前页」的 Channel 读进内存，避免全量加载（台账 3.6）。
+		var countErr error
+		total, countErr = searchChannelsCount(keyword, group, modelKeyword, statusFilter, typeFilter)
+		if countErr != nil {
+			common.ApiError(c, countErr)
+			return
+		}
+
+		var counts []model.ChannelTypeCount
+		if err := model.ChannelTypeCounts(
+			model.NewChannelSearchQuery(keyword, group, modelKeyword, statusFilter, -1), &counts); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		channelData = channels
-	}
-
-	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
-				continue
-			}
-			if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
-				continue
-			}
-			filtered = append(filtered, ch)
+		for _, r := range counts {
+			typeCounts[r.Type] = r.Count
 		}
-		channelData = filtered
-	}
 
-	// calculate type counts for search results
-	typeCounts := make(map[int64]int64)
-	for _, channel := range channelData {
-		typeCounts[int64(channel.Type)]++
-	}
-
-	typeParam := c.Query("type")
-	typeFilter := -1
-	if typeParam != "" {
-		if tp, err := strconv.Atoi(typeParam); err == nil {
-			typeFilter = tp
+		channelData = make([]*model.Channel, 0)
+		if err := sortOptions.Apply(
+			model.NewChannelSearchQuery(keyword, group, modelKeyword, statusFilter, typeFilter)).
+			Limit(pageSize).
+			Offset(startIdx).
+			Find(&channelData).Error; err != nil {
+			common.ApiError(c, err)
+			return
 		}
 	}
 
-	if typeFilter >= 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if ch.Type == typeFilter {
-				filtered = append(filtered, ch)
-			}
-		}
-		channelData = filtered
+	var pagedData []*model.Channel
+	if enableTagMode {
+		start := min(startIdx, len(channelData))
+		end := min(start+pageSize, len(channelData))
+		pagedData = channelData[start:end]
+	} else {
+		pagedData = channelData
 	}
-
-	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-
-	total := len(channelData)
-	startIdx := min((page-1)*pageSize, total)
-	endIdx := min(startIdx+pageSize, total)
-
-	pagedData := channelData[startIdx:endIdx]
 
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
@@ -428,6 +449,13 @@ func SearchChannels(c *gin.Context) {
 		"type_counts": typeCounts,
 	})
 	return
+}
+
+// searchChannelsCount 统计当前过滤条件下的渠道总数。
+func searchChannelsCount(keyword string, group string, modelKeyword string, statusFilter int, typeFilter int) (int64, error) {
+	var total int64
+	err := model.NewChannelSearchQuery(keyword, group, modelKeyword, statusFilter, typeFilter).Count(&total).Error
+	return total, err
 }
 
 func GetChannel(c *gin.Context) {
