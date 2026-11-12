@@ -242,7 +242,7 @@ gin 1.9.1 与 Go 1.26 存在版本落差。**升级属独立提案**，须按 `A
 - [ ] **4.4** 抽 `useServerDataTable` 组合 hook，消除 8 个表格页约 2600 行重复
 - [x] **4.5**（2026-10）query key 工厂化：新增 `src/lib/query-keys.ts`（跨域全局键）+ 10 个特性域 `lib/query-keys.ts`，扩展 `modelsQueryKeys`/`channelsQueryKeys`；163 处内联字面量迁移 145 处，剩余 18 处均为单站点查询键（无 query↔invalidate 配对，按判定标准保留，含 3 个表格列表键与 15 个一次性静态/参数键）。工厂产出键结构与原字面量逐字一致（`['prefill_groups','model']` 的 snake_case、`['channels', id, provider, 'inference-status']` 等特殊形态均原样保留）。**判定标准**：迁移所有 ≥2 生命周期站点（query/invalidate/refetch/remove/cancel/isFetching/setQueryData）或同族多形态的键；单站点键无「拼写错误静默永不失效」风险，保留字面量。
 - [ ] **4.6** 约 90 处 Intl locale 接线：现有 lint 只拦**不安全** locale，不拦**缺失** locale，故 `ai-elements/context.tsx` 的 10 处硬编码 `'en-US'` 等静默通过且不随语言切换重排
-- [ ] **4.7** 补 E2E 与覆盖率工具链 —— `web/AGENTS.md:193` 要求 MSW/Playwright 与 80% 覆盖率，当前两者都不存在、无 coverage provider；`routes/oauth/$provider.tsx`（261 行，鉴权关键）零测试
+- [ ] **4.7** 补覆盖率与鉴权关键路径测试 —— **口径更正（2026-11-12 复核）**：Playwright **已就绪**（`web/package.json:19` `test:e2e`、`:92` `@playwright/test^1.64.1`、`web/playwright.config.ts`、`web/e2e/` 4 个 spec、`.github/workflows/ci.yml:172` e2e job），仍缺 `msw` / `@vitest/coverage-v8` / 80% 阈值；`web/src/routes/` 64 个 `.tsx` **零测试**，`routes/oauth/$provider.tsx`（**279 行**，含 code/state 交换、postMessage origin 校验、`sanitizeAuthRedirect`、登录去重）零测试，`_authenticated/route.tsx` 守卫同。
 
 ### Phase 5 — 全局状态与可测试性（最底层，必须最后）
 
@@ -472,8 +472,8 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 
 #### 未决项（不擅自改动，需产品决策或前后端协同）
 
-- **#5 `add_quota` 二次验证**：`service/security_verification.go:52` 注释明确「Quota adjustments are not gated」，`security_enrollment_test.go:778` 把 `add_quota` 从 `admin.user.manage` scope 排除，前端无 proof 传递链路——属**有意设计**。强加 proof 会破坏管理员现网功能，需前后端协同设计新 scope 与迁移方案。
-- **#6 改密不撤 PAT/relay token**：`service/auth_session.go:212` 明示 token 保持有效；OWASP 两份 Cheat Sheet 均未强制「改密后全局撤销所有 token」（Session Management 明列为 coverage gap，仅要求会话 ID 更新/销毁与重认证）。且 relay token 是 API 网关核心凭据，全局撤销是产品级决策，需评估业务影响。当前缓解：`auth_version` 递增使浏览器会话失效；软/硬删用户会删 PAT 并清缓存；禁用用户被 Status 拒。
+- **#5 `add_quota` 二次验证**：`service/security_verification.go:52` 注释明确「Quota adjustments are not gated」，`controller/security_enrollment_test.go:778` 把 `add_quota` 从 `admin.user.manage` scope 排除——属**有意设计**。**口径更正（2026-11-12 复核）**：前端并非没有调用，而是 `web/src/features/users/api.ts:168` 的 `adjustUserQuota` 直发 `POST /api/user/manage`（对照同文件 `:152` 的 `manageUser` 带 `securityProofConfig`），即「有调用、但无 proof 链」。补偿控制：`AdminAuth`(`router/api-router.go:156`)、`model/user_quota_adjustment.go:39/42` 行锁 + 目标角色校验、`controller/user_quota.go:34-45` defer 审计（审计失败不回滚，见 `controller/user_manage_test.go:370`）。强加 proof 需前后端协同设计新 scope 与迁移方案。
+- **#6 改密不撤 PAT/relay token（口径更正 2026-11-12）**：复核发现 **PAT 实际已失效**——`model/user_access_token.go:282` 校验 `user.AuthVersion != identity.UserAuthVersion` 即返回 `ErrUserSessionInactive`，改密事务内 `model/account_security.go:50` 递增 auth_version 后 PAT 随即失效；`controller/user.go:863` 对 PAT 返回 nil bundle 属预期行为。**真正残留仅 relay token**：`middleware/auth.go:558` → `model/token.go:220` `ValidateUserToken` 不读取 auth_version。OWASP 两份 Cheat Sheet 均未强制「改密后全局撤销所有 token」（Session Management 明列为 coverage gap，仅要求会话 ID 更新/销毁与重认证），且 relay token 是 API 网关核心凭据，全局撤销属产品级决策。既有缓解：`auth_version` 递增使浏览器会话与 PAT 失效；软/硬删用户删 PAT 并清缓存；禁用用户被 Status 拒。
 - **P1 性能**（本次未改）：`channel_cache.go:129` 全局读锁覆盖整段选渠道 + 写方三重循环；`model/log.go:101` 每请求同步 INSERT；后台 goroutine/ticker 无 context；`model/channel.go:446` SearchChannels 内存分页（3.6 既有项）。
 - **P1 SSRF**：项目已有 `common/ssrf_protection.go`/`service/protected_fetch_client.go`，但 `custom_oauth.go:157`、`service/ratio_sync.go:741`、`service/uptime_kuma.go:146` 的管理员/匿名外发请求未复用（均 RootAuth 或匿名可达，需单独设计）。
 
@@ -560,3 +560,53 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 #### 口径说明
 
 未带 `TEST_MYSQL_DSN`/`TEST_POSTGRES_DSN`，mysql/postgres 子测试静默 skip，本次仅覆盖 sqlite 分支；新查询的方言差异集中在 `channelSearchColumns()`，三方言金标准仍以 CI（Linux）为准。
+
+### 8.7 下一批候选优化点清单（2026-11-12 只读研判，未实施）
+
+四路只读调研（后端架构/代码质量、后端性能/正确性、前端/工程化、安全/OWASP）汇总。仅登记实证结论，**本轮不实施**。分级标准：【A】可直接做＝改动小、收益明确、有现成范式、不破坏契约；【B】需专门设计＝收益高但需压测或迁移；【C】需产品/前后端决策。
+
+#### 【A】可直接做（高性价比，优先）
+
+| 优先级 | 点 | 证据 | 影响 / 修法 |
+|---|---|---|---|
+| A1 | **日志脱敏漏网**（上一轮 #7 未覆盖） | `controller/topup.go:363`、`:436` 仍把 `common.GetJsonString(params)` 与 `path=%q` 完整落盘：Epay 下单/回调参数含 `sign`，GET 回调查询串亦完整记录。同文件 `:464/:476/:495` 及 Creem/Stripe/Waffo/Pancake 已改为 `common.LogFingerprint` | 签名可重放。直接套 `:464` 范式，仅改日志参数、不动格式串（保翻译 key） |
+| A2 | **审计写失败被吞且抑制兜底** | `model/audit_log.go:115,134` 写库失败仅 `LogError` 且函数返回 void；`controller/audit.go:39,87,101` 无条件 `markAuditLogged(c)`；`middleware/audit.go:131` 见标记即 return 跳过兜底 | 审计库故障时**零留痕**，68 处站点受影响（45 manage + 23 security）。令 `RecordAuditLog` 返回 error、仅成功才置标记，约 5 文件 |
+| A3 | **`UpdateOption` 丢弃 DB 写错误** | `model/option.go:271` `DB.FirstOrCreate(...)` 与 `:276` `DB.Save(...)` 均未取 `.Error`，`:278` 直接 `return updateOptionMap(...)`；对照 `:324,328` 的 `UpdateOptionsBulk` 逐步查错 | 写库失败仍返回 nil、内存已生效、重启丢失；7 处生产调用。补两处 `.Error` 即可 |
+| A4 | **配置同步读错误被丢弃** | `model/option.go:208` `options, _ := AllOption()`；`:215-218` 逐 key 失败仅 SysLog；`SyncOptions:225` 每 60s 重放 145 legacy key + 25 config 模块 | DB 读失败时注册开关/验证码/限流/密钥变更永不生效且零告警 |
+| A5 | **渠道缓存原地写导致 data race** | `model/channel_cache.go:270` `channel.Status = status` 直接改缓存对象；读方 `:131` RLock 与 `channel.go:774` 的 `GetChannelPollingLock` 两锁不互斥 | 仿 `CacheUpdateChannel:304`（已替换指针），改浅拷贝写回 `channelsIDM[id]=&copied`，约 3 行 |
+| A6 | **写锁内三重循环 O(G×M×C)** | `model/channel_cache.go:274-284` 持写锁遍历全 `group2model2channels`；读锁 `:131-223` 还覆盖 `filterCandidateIDs`/`sort.Sort:169`/`rand` | **无需整体重写 atomic.Value**：在 `InitChannelCache:51-99` 顺带建 `channelID→[]group/model` 索引，写锁内 O(1) 定位，2 处改动 |
+| A7 | **前端 footer XSS** | `web/src/components/layout/components/footer.tsx:238` `dangerouslySetInnerHTML={{__html: footerHtml}}` 无净化；对照 `html-content.tsx:126-131`、`markdown.tsx:760` 均用 DOMPurify；`footer_html` 来自服务端可配 | 复用现成 `sanitizeHtmlContent` 即可 |
+| A8 | **渠道 key 前缀写入 Name** | `controller/channel.go:800-805` `BatchAddSetKeyPrefix2Name` 把 key 前 8 位拼进 `Name`；`Omit("key")` 不覆盖 name，`Name` 随 ChannelRead 全量返回并进 `channel.key_view` 审计 | 改用 `common.LogFingerprint` 生成不可逆标识 |
+| A9 | **冷缓存/重试 DB 查询放大** | `model/user.go:1336 GetUserSetting`（`log.go:287/353` 每次日志调用）未命中 1 次 DB，defer `:1318-1324` 又触发 `updateUserCacheField:263` 第 2 次；`GetUsernameById:1547` 同理；`relay.go:279` 每次重选渠道、`:96` 每次同步 `RecordErrorLog` | defer 回填复用已得 `UserBase`/`AuthVersion`，`GetUserSetting` 按请求存 `gin.Context`，3 处改动可减半 |
+| A10 | **鉴权关键路由零测试** | `web/src/routes/` 64 个 `.tsx` 零测试；`routes/oauth/$provider.tsx` 279 行含 code/state 交换、postMessage origin 校验、`sanitizeAuthRedirect`、登录去重 | 已有 Playwright + vitest 基建，补针对性用例即可 |
+| A11 | **`common/` 启动期常量收敛** | 实测 137 个包级变量中 35 个仅 `common/init.go` 写一次、42 个从未赋值；`constants.go:218-246` 20 个限流配置仅 2 文件 25 次读 | 照 `common/disk_cache_config.go:9-41` 只读 struct + getter 范式；顺带清死项（`constants.go:187 GeminiSafetySetting` 0 引用，环境变量完全无效；8 处零调用导出函数） |
+
+#### 【B】需专门设计 + 压测
+
+- **token 缓存失效 fail-open**：`model/token_cache.go:43-47` fence `SET` 与哈希 `DEL` 非原子；`model/token.go:330/338/346/475` 失效失败仅 SysLog 仍写库；读路径 `cacheGetTokenByKey:94-107` 不查 fence → DEL 失败而 SET 成功时，停用 token 在 TTL=60s 内持续放行。需 Lua 原子化或失败即中止写库；fence 固定 10s，DB 写超 10s 时旧快照可回填。
+- **option.go 145 case 重复规则**：`model/option.go:348-690` 145 个 case 与 `:33-196` 145 个同 key 默认值逐字重复，已漂移（仅 Init 有 About/HomePageContent/Notice，仅 switch 有 LinuxDOClientId/ClientSecret/MinimumTrustLevel）。`setting/config/config.go:165-273` 反射机制不能直接替代扁平键；小步方案：抽共享 `key→setter` 表，并接线已写好却 0 调用的 `LoadFromDB:42`。
+- **后台协程 shutdown handle**：`main.go` 11 个常驻协程，关停段 `:238-259` 仅 `srv.Shutdown` + `FlushBatchUpdates`；`common/rate-limit.go:95` ticker 无 Stop（2 个 limiter 各泄漏一个）、`common/system_monitor.go:37-49` 即使 Enabled=false 也 30s 空转。现成范式 `service/system_task.go:309-317` 的 `context.WithCancel + defer ticker.Stop()`。
+- **无界 goroutine 池**：`common/gopool.go:13` `NewPool(..., math.MaxInt32, ...)` 等于无界，`token.go:400/431`、`user.go:1290/1532` 的 `gopool.Go` 不受控。
+- **日志表索引优化**（不改可靠性语义）：`model/log.go:58-77` 约 16 个索引，4 个复合索引前缀已覆盖多个单列索引，每次 INSERT 全量维护；删冗余单列索引属 DDL 级改动，需查询计划验证。
+- **前端 4.4 `useServerDataTable`**：8 个消费页 2587 行、`columnFilters.find(...)` 已涨到 14 处/6 文件；已有 `use-table-url-state.ts`(269)、`use-data-table.ts:278`、`data-table-page.tsx`(544) 半成品，缺组合 glue 与统一 query key/分页契约。
+- **前端 4.3 拆 5095 行 drawer**：实测 `channel-mutate-drawer.tsx` 5095 行、`drawers/sections/` 7 文件 332 行；已接线 5 个 section（`:244-251`），但 `ChannelApiAccessSection` 仍包住 `:3551-4607` 千行主体。另有 `channel-advanced-section.tsx`(81 行) 全 src 零引用孤儿。
+- **前端 4.6 Intl 缺失 locale**：生产调用 110 处，`ai-elements/context.tsx` 10 处硬编码 `'en-US'`；`scripts/oxlint/intl-locale.mjs:170-173` 对合法 BCP47 字面量返回 false、缺参数不报，需加分支 + 1 个 test fixture。
+- **覆盖率工具链**：`vitest.config.ts` 无 coverage 块、无 `@vitest/coverage-v8`/`msw`、无阈值；CI 仅改文件 oxlint（主干 164 errors）。最小落地：加 provider + reporter + `test:coverage`（暂不设阈值）+ CI 一步。
+
+#### 【C】需产品决策 / 前后端协同
+
+- **#5 `add_quota` proof**（口径已更正，见 §8.4）：前端 `web/src/features/users/api.ts:168` 确有调用但无 proof 链，需新 scope 绑定金额 + 前后端协同。
+- **`#6` relay token**（口径已更正）：PAT 已失效，仅 `middleware/auth.go:558` → `model/token.go:220` 不读 auth_version；全局撤销 relay token 属产品级决策。
+- **step-up 未覆盖资金写**：`router/api-router.go:160` 人工补单、`:198` 订阅 admin bind、`:220` `PUT /api/option/` 仅 AdminAuth/RootAuth，无 `requireAdminUserProof`。
+- **OAuth `iss`+`sub`**：`oauth/oidc.go:110-155` 直接取 userinfo 响应体 `sub` 作绑定 ID，`:106` 的 IDToken 未验签/未校 iss/aud；仅 `oauth/telegram.go:158` 用 `oidc.NewVerifier`。涉及 AGENTS.md 的 OWASP 强制条款。
+- **日志异步化**：`model/log.go:101` 同步 INSERT；有界异步队列会改变日志可靠性语义（崩溃丢日志），`usedata.go:95-123` 有范式但不宜默认开启。
+
+#### 口径更正（本轮复核）
+
+- **4.7**：Playwright **已就绪**（`web/package.json:19/92`、`web/playwright.config.ts`、`web/e2e/` 4 spec、`.github/workflows/ci.yml:172`），仅缺 MSW/coverage provider/阈值；台账旧述「两者都不存在」已更正。
+- **5.5**：D10 各行均已划线，仅 `model/option.go:348` switch 明确转 5.3，属空项，建议关闭。
+- **CSRF**：`SESSION_COOKIE_SECURE=false` 默认值使 `middleware/auth_origin.go:19` 跳过 OriginGuard，但 `docker-compose.prod.yml:33` 已置 true 且 refresh cookie 恒 `SameSite=Strict`，风险低，不作为债。
+
+#### 合规确认（无需改）
+
+审计已排除密钥（`model/audit_log.go:61` TokenRef=SHA256、`middleware/audit.go:209` 不落 body、审计 code 是错误码非验证码）；批量接口带 `user_id` 归属校验；匿名路由未见被低估写操作；前端 token 存储健康（`auth-store.ts` 无 persist、`auth-session.ts:72` withCredentials + 内存 Bearer，localStorage 仅存 aff/view-mode）。
