@@ -569,9 +569,9 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 
 | 优先级 | 点 | 证据 | 影响 / 修法 |
 |---|---|---|---|
-| A1 | **日志脱敏漏网**（上一轮 #7 未覆盖） | `controller/topup.go:363`、`:436` 仍把 `common.GetJsonString(params)` 与 `path=%q` 完整落盘：Epay 下单/回调参数含 `sign`，GET 回调查询串亦完整记录。同文件 `:464/:476/:495` 及 Creem/Stripe/Waffo/Pancake 已改为 `common.LogFingerprint` | 签名可重放。直接套 `:464` 范式，仅改日志参数、不动格式串（保翻译 key） |
-| A2 | **审计写失败被吞且抑制兜底** | `model/audit_log.go:115,134` 写库失败仅 `LogError` 且函数返回 void；`controller/audit.go:39,87,101` 无条件 `markAuditLogged(c)`；`middleware/audit.go:131` 见标记即 return 跳过兜底 | 审计库故障时**零留痕**，68 处站点受影响（45 manage + 23 security）。令 `RecordAuditLog` 返回 error、仅成功才置标记，约 5 文件 |
-| A3 | **`UpdateOption` 丢弃 DB 写错误** | `model/option.go:271` `DB.FirstOrCreate(...)` 与 `:276` `DB.Save(...)` 均未取 `.Error`，`:278` 直接 `return updateOptionMap(...)`；对照 `:324,328` 的 `UpdateOptionsBulk` 逐步查错 | 写库失败仍返回 nil、内存已生效、重启丢失；7 处生产调用。补两处 `.Error` 即可 |
+| A1 ✅ | **日志脱敏漏网**（上一轮 #7 未覆盖） | `controller/topup.go:363`、`:436` 仍把 `common.GetJsonString(params)` 与 `path=%q` 完整落盘：Epay 下单/回调参数含 `sign`，GET 回调查询串亦完整记录。同文件 `:464/:476/:495` 及 Creem/Stripe/Waffo/Pancake 已改为 `common.LogFingerprint` | 签名可重放。直接套 `:464` 范式，仅改日志参数、不动格式串（保翻译 key） |
+| A2 ✅ | **审计写失败被吞且抑制兜底** | `model/audit_log.go:115,134` 写库失败仅 `LogError` 且函数返回 void；`controller/audit.go:39,87,101` 无条件 `markAuditLogged(c)`；`middleware/audit.go:131` 见标记即 return 跳过兜底 | 审计库故障时**零留痕**，68 处站点受影响（45 manage + 23 security）。令 `RecordAuditLog` 返回 error、仅成功才置标记，约 5 文件 |
+| A3 ✅ | **`UpdateOption` 丢弃 DB 写错误** | `model/option.go:271` `DB.FirstOrCreate(...)` 与 `:276` `DB.Save(...)` 均未取 `.Error`，`:278` 直接 `return updateOptionMap(...)`；对照 `:324,328` 的 `UpdateOptionsBulk` 逐步查错 | 写库失败仍返回 nil、内存已生效、重启丢失；7 处生产调用。补两处 `.Error` 即可 |
 | A4 | **配置同步读错误被丢弃** | `model/option.go:208` `options, _ := AllOption()`；`:215-218` 逐 key 失败仅 SysLog；`SyncOptions:225` 每 60s 重放 145 legacy key + 25 config 模块 | DB 读失败时注册开关/验证码/限流/密钥变更永不生效且零告警 |
 | A5 | **渠道缓存原地写导致 data race** | `model/channel_cache.go:270` `channel.Status = status` 直接改缓存对象；读方 `:131` RLock 与 `channel.go:774` 的 `GetChannelPollingLock` 两锁不互斥 | 仿 `CacheUpdateChannel:304`（已替换指针），改浅拷贝写回 `channelsIDM[id]=&copied`，约 3 行 |
 | A6 | **写锁内三重循环 O(G×M×C)** | `model/channel_cache.go:274-284` 持写锁遍历全 `group2model2channels`；读锁 `:131-223` 还覆盖 `filterCandidateIDs`/`sort.Sort:169`/`rand` | **无需整体重写 atomic.Value**：在 `InitChannelCache:51-99` 顺带建 `channelID→[]group/model` 索引，写锁内 O(1) 定位，2 处改动 |
@@ -610,3 +610,37 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 #### 合规确认（无需改）
 
 审计已排除密钥（`model/audit_log.go:61` TokenRef=SHA256、`middleware/audit.go:209` 不落 body、审计 code 是错误码非验证码）；批量接口带 `user_id` 归属校验；匿名路由未见被低估写操作；前端 token 存储健康（`auth-store.ts` 无 persist、`auth-session.ts:72` withCredentials + 内存 Bearer，localStorage 仅存 aff/view-mode）。
+
+### 8.8 A1–A3 落地：错误不再被吞、签名不再落盘（2026-11-16）
+
+延续 §8.7 的【A】级候选。提交 `8644b2408`。全程遵守资源最小化：**零 Docker、GOMAXPROCS=2、-p 1、sqlite 内存库定向验证**。
+
+#### A1 日志脱敏漏网（上一轮 #7 的盲区）
+
+- 新 `common.LogSafeRequestURI`：保留请求路径便于排障，把 `?` 后的 query 替换为 `LogFingerprint` 指纹。Epay GET 回调把 `sign`/交易参数放在 query，直接记录 `c.Request.RequestURI` 等于把可重放凭据写进日志；支付跳转 URL 同理。
+- 替换 `controller/topup.go` 全部 9 处 + `subscription_payment_epay.go` 2 处 `path=%q` 参数，以及下单/回调的 `params=%q` JSON（改 `LogFingerprint` 包裹）。
+- **格式串逐字不动**：`LogText` 的格式串是 `log_text.zh-CN.json` 的翻译 key，改了会让中文翻译全部失效——这也解释了为何在日志参数层做脱敏是唯一安全做法。
+- 新增静态守卫测试：扫描两个文件的日志行，出现裸 `c.Request.RequestURI` 或未包裹的 `GetJsonString(params)` 即失败，防止后续重构悄悄退回明文。
+
+#### A2 审计写失败不再抑制兜底
+
+- `model.RecordAuditLog` / `RecordOperationAuditLog` 返回 `error`，带三个哨兵：`ErrAuditLogUnavailable` / `ErrAuditLogEncodeFailed` / `ErrAuditLogWriteFailed`。
+- `controller.markAuditLoggedOnSuccess(c, err)` 只在写入成功时置 `ContextKeyAuditLogged`；失败时 LogWarn 且**不置标记**，让 `middleware.finishAdminAudit` 仍能写一条 generic 审计。旧实现「精细日志写失败 + 无条件标记」＝零留痕且无告警。
+- `recordUserSecurityAudit`（普通用户安全操作，无 AdminAuth 兜底）显式告警错误。
+- middleware 兜底自身与 `RecordLoginLog` 等无更外层降级的调用点，用 `_ = RecordAuditLog(...)` 加中文注释标明「已尽力而为」，避免后续误改成吞错。
+
+#### A3 UpdateOption 不再吞 DB 错误
+
+- `FirstOrCreate` 与 `Save` 均检查 `.Error`，失败立即返回，**不再更新内存 OptionMap**（旧实现内存生效、重启静默回滚）。
+- 查错口径与 `UpdateOptionsBulk` 对齐；新增注释说明「先持久化、再更新内存」的顺序约束。
+
+#### 验证
+
+- `gofmt -l` 无输出；`go build ./...` / `go vet` EXIT=0。
+- 定向回归（零 Docker）：common 0.261s / model 0.420s / controller 0.693s / service 0.313s，零失败。
+- 既有审计套件中 `TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner` 在并发批次内因已知 SQLite 锁假失败，**单独重跑 0.959s 通过**（台账 §8.3 已记录此现象），与本次改动无关。
+- A3 测试初版曾因 `common.OptionMap` 为 nil panic，已修测试基建（测试中初始化并恢复 map），非产品代码缺陷。
+
+#### 未做
+
+§8.7 的【B】【C】类仍未实施；单批回归中未带 DSN，mysql/postgres 子测试静默 skip。
