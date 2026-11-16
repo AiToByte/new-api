@@ -184,8 +184,6 @@ var RelayResponseHeaderTimeout int // unit is second
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
 
-var GeminiSafetySetting string
-
 // https://docs.cohere.com/docs/safety-modes Type; NONE/CONTEXTUAL/STRICT
 var CohereSafetySetting string
 

@@ -798,11 +798,11 @@ func AddChannel(c *gin.Context) {
 		localChannel := addChannelRequest.Channel
 		localChannel.Key = key
 		if addChannelRequest.BatchAddSetKeyPrefix2Name && len(keys) > 1 {
-			keyPrefix := localChannel.Key
-			if len(localChannel.Key) > 8 {
-				keyPrefix = localChannel.Key[:8]
-			}
-			localChannel.Name = fmt.Sprintf("%s %s", localChannel.Name, keyPrefix)
+			// 用不可逆指纹替代 key 前 8 位：Name 会随 ChannelRead 全量返回，
+			// 也会进入 channel.key_view 审计，明文前缀等于泄露可用凭据的一部分。
+			// 指纹仍可让管理员区分同批导入的多个渠道。
+			keyTag := common.LogFingerprint(localChannel.Key)
+			localChannel.Name = fmt.Sprintf("%s %s", localChannel.Name, keyTag)
 		}
 		channels = append(channels, *localChannel)
 	}

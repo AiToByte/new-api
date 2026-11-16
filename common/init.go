@@ -117,8 +117,10 @@ func InitEnv() {
 	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)
 	RelayMaxIdleConnsPerHost = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS_PER_HOST", 100)
 
+	// 注意：GEMINI_SAFETY_SETTING 环境变量已移除——它初始化的
+	// common.GeminiSafetySetting 从未被读取，实际生效的是
+	// setting/model_setting.GetGeminiSafetySetting(key)（按模型配置读取）。
 	// Initialize string variables with GetEnvOrDefaultString
-	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
 	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
 
 	// Initialize rate limit variables
