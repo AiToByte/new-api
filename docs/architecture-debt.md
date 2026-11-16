@@ -572,9 +572,9 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 | A1 ✅ | **日志脱敏漏网**（上一轮 #7 未覆盖） | `controller/topup.go:363`、`:436` 仍把 `common.GetJsonString(params)` 与 `path=%q` 完整落盘：Epay 下单/回调参数含 `sign`，GET 回调查询串亦完整记录。同文件 `:464/:476/:495` 及 Creem/Stripe/Waffo/Pancake 已改为 `common.LogFingerprint` | 签名可重放。直接套 `:464` 范式，仅改日志参数、不动格式串（保翻译 key） |
 | A2 ✅ | **审计写失败被吞且抑制兜底** | `model/audit_log.go:115,134` 写库失败仅 `LogError` 且函数返回 void；`controller/audit.go:39,87,101` 无条件 `markAuditLogged(c)`；`middleware/audit.go:131` 见标记即 return 跳过兜底 | 审计库故障时**零留痕**，68 处站点受影响（45 manage + 23 security）。令 `RecordAuditLog` 返回 error、仅成功才置标记，约 5 文件 |
 | A3 ✅ | **`UpdateOption` 丢弃 DB 写错误** | `model/option.go:271` `DB.FirstOrCreate(...)` 与 `:276` `DB.Save(...)` 均未取 `.Error`，`:278` 直接 `return updateOptionMap(...)`；对照 `:324,328` 的 `UpdateOptionsBulk` 逐步查错 | 写库失败仍返回 nil、内存已生效、重启丢失；7 处生产调用。补两处 `.Error` 即可 |
-| A4 | **配置同步读错误被丢弃** | `model/option.go:208` `options, _ := AllOption()`；`:215-218` 逐 key 失败仅 SysLog；`SyncOptions:225` 每 60s 重放 145 legacy key + 25 config 模块 | DB 读失败时注册开关/验证码/限流/密钥变更永不生效且零告警 |
-| A5 | **渠道缓存原地写导致 data race** | `model/channel_cache.go:270` `channel.Status = status` 直接改缓存对象；读方 `:131` RLock 与 `channel.go:774` 的 `GetChannelPollingLock` 两锁不互斥 | 仿 `CacheUpdateChannel:304`（已替换指针），改浅拷贝写回 `channelsIDM[id]=&copied`，约 3 行 |
-| A6 | **写锁内三重循环 O(G×M×C)** | `model/channel_cache.go:274-284` 持写锁遍历全 `group2model2channels`；读锁 `:131-223` 还覆盖 `filterCandidateIDs`/`sort.Sort:169`/`rand` | **无需整体重写 atomic.Value**：在 `InitChannelCache:51-99` 顺带建 `channelID→[]group/model` 索引，写锁内 O(1) 定位，2 处改动 |
+| A4 ✅ | **配置同步读错误被丢弃** | `model/option.go:208` `options, _ := AllOption()`；`:215-218` 逐 key 失败仅 SysLog；`SyncOptions:225` 每 60s 重放 145 legacy key + 25 config 模块 | DB 读失败时注册开关/验证码/限流/密钥变更永不生效且零告警 |
+| A5 ✅ | **渠道缓存原地写导致 data race** | `model/channel_cache.go:270` `channel.Status = status` 直接改缓存对象；读方 `:131` RLock 与 `channel.go:774` 的 `GetChannelPollingLock` 两锁不互斥 | 仿 `CacheUpdateChannel:304`（已替换指针），改浅拷贝写回 `channelsIDM[id]=&copied`，约 3 行 |
+| A6 ✅ | **写锁内三重循环 O(G×M×C)** | `model/channel_cache.go:274-284` 持写锁遍历全 `group2model2channels`；读锁 `:131-223` 还覆盖 `filterCandidateIDs`/`sort.Sort:169`/`rand` | **无需整体重写 atomic.Value**：在 `InitChannelCache:51-99` 顺带建 `channelID→[]group/model` 索引，写锁内 O(1) 定位，2 处改动 |
 | A7 | **前端 footer XSS** | `web/src/components/layout/components/footer.tsx:238` `dangerouslySetInnerHTML={{__html: footerHtml}}` 无净化；对照 `html-content.tsx:126-131`、`markdown.tsx:760` 均用 DOMPurify；`footer_html` 来自服务端可配 | 复用现成 `sanitizeHtmlContent` 即可 |
 | A8 | **渠道 key 前缀写入 Name** | `controller/channel.go:800-805` `BatchAddSetKeyPrefix2Name` 把 key 前 8 位拼进 `Name`；`Omit("key")` 不覆盖 name，`Name` 随 ChannelRead 全量返回并进 `channel.key_view` 审计 | 改用 `common.LogFingerprint` 生成不可逆标识 |
 | A9 | **冷缓存/重试 DB 查询放大** | `model/user.go:1336 GetUserSetting`（`log.go:287/353` 每次日志调用）未命中 1 次 DB，defer `:1318-1324` 又触发 `updateUserCacheField:263` 第 2 次；`GetUsernameById:1547` 同理；`relay.go:279` 每次重选渠道、`:96` 每次同步 `RecordErrorLog` | defer 回填复用已得 `UserBase`/`AuthVersion`，`GetUserSetting` 按请求存 `gin.Context`，3 处改动可减半 |
@@ -644,3 +644,32 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 #### 未做
 
 §8.7 的【B】【C】类仍未实施；单批回归中未带 DSN，mysql/postgres 子测试静默 skip。
+
+### 8.9 A4–A6 落地：配置读取失败与渠道缓存竞态（2026-11-16）
+
+延续 §8.7 的【A】级候选。提交 `cc5e20e5b`。遵守资源最小化：零 Docker、GOMAXPROCS=2、-p 1、sqlite 内存库。
+
+#### A4 配置同步读失败不再静默清空
+
+- `loadOptionsFromDatabase()` 返回 `error`：`AllOption()` 失败立即返回，**不再用空数据集继续覆盖内存**。旧实现的严重隐患是 DB 短暂不可用时 `options` 为 nil、循环不执行，但 `applyPasskeyDomainOptions(empty)` 仍会执行——把已配置的 passkey 信任域名清空，且只留 info 级日志。
+- 逐 key `updateOptionMap` 失败用 `errors.Join` 聚合，由 `InitOptionMap` / `SyncOptions` 以 error 级显式告警；其余 key 继续加载不受影响。
+- `passkeyOptionMutex` 获取移到 DB 读之后（其余持锁点不同时持 requestPolicyOptionMutex，无反向锁序），只缩短临界区。
+
+#### A5 渠道缓存原地写竞态
+
+- `CacheUpdateChannelStatus` 从 `channel.Status = status` 改为浅拷贝后替换 `channelsIDM[id]` 指针，与 `CacheUpdateChannel` 的既有范式一致。旧读者（RLock 内的选渠道路径、或由独立 `GetChannelPollingLock` 保护的多 key 轮询）持有的快照不再被并发改写。
+
+#### A6 写锁内三重循环改索引
+
+- `InitChannelCache` 在建 `group2model2channels` 时同步构建 `channelGroupModelIndex map[int][]channelGroupModelKey`；`CacheUpdateChannelStatus` 按索引只遍历该渠道实际出现的桶，不再持写锁遍历整张 G×M×C 表。索引与表在同锁下发布，一致性有保障。
+
+#### 验证与限制
+
+- `gofmt -l` 无输出；`go build ./...` / `go vet` EXIT=0。
+- 合并定向回归：model 0.281s / controller 0.915s / common 0.188s / service 0.312s，零失败。
+- **本机无 gcc（CGO_ENABLED=0 且 `gcc` 不在 PATH），`-race` 无法运行**。为验证 A5 的不变量，新增确定性并发测试：读者持续断言旧快照 Status 恒定，写方循环 100 次状态切换——旧实现会让该断言失败。正式 `-race` 验证应交给 CI（Linux）。
+- 口径：未带 DSN，mysql/postgres 子测试静默 skip，仅覆盖 sqlite 分支。
+
+#### 仍待办
+
+§8.7 的【A】级剩 A7–A11（footer XSS、key 前缀泄露、冷缓存 DB 放大、鉴权路由零测试、`common/` 常量收敛）；【B】【C】类未动。
