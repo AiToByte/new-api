@@ -35,6 +35,10 @@ const tokenCacheFenceSeconds = 10
 // invalidateTokenCacheForMutation is called before a token metadata mutation
 // writes to the database: it raises the fence and drops the cached hash so no
 // reader can act on (or re-publish) the pre-mutation state.
+//
+// 任何一步失败都返回 error：调用方必须据此决定是否继续写库。
+// 注意 fence 即使 DEL 失败也不能回滚——保留 fence 能让读路径（现在会检查
+// fence）绕过可能仍在的旧 hash 去查数据库，是 DEL 失败时的安全兜底。
 func invalidateTokenCacheForMutation(key string) error {
 	if !common.RedisEnabled || key == "" {
 		return nil
@@ -91,10 +95,28 @@ return 1`
 }
 
 // cacheGetTokenByKey 从缓存读取 token；不完整的哈希（如仅有配额字段）会被拒绝。
+//
+// 命中哈希后必须检查 fence：fence 由「令牌状态变更」在写库前升起，用于覆盖
+// DEL 哈希失败或「读者已读到旧快照、尚未发布」的竞态窗口。如果只依赖
+// cacheInitToken 里的 fence 检查，那么已经存在于 Redis 的旧 hash 会被这里
+// 直接返回——管理员已停用的令牌在 TTL（默认 60s）内仍可通过鉴权。
+// 这违反 OWASP「撤销后任何会话标识都不得再被接受用于认证」的要求。
+//
+// fence 检查失败（Redis 故障）时返回 error 而不是放行缓存：鉴权路径会
+// 回退到数据库权威状态，宁可多一次查询也不接受可能已撤销的快照。
 func cacheGetTokenByKey(key string) (*Token, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
+	ctx := context.Background()
+	fence, err := common.RDB.Exists(ctx, getTokenCacheFenceKey(key)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check token cache fence: %w", err)
+	}
+	if fence > 0 {
+		return nil, fmt.Errorf("token cache is fenced")
+	}
+
 	var token Token
 	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
 		return nil, err

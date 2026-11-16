@@ -324,11 +324,12 @@ func (token *Token) Insert() error {
 	return err
 }
 
-// Update Make sure your token's fields is completed, because this will update non-zero values
+// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
+// 失效失败必须中止写库：若库里已停用/删除但缓存仍可供旧快照通过鉴权，
+// 就形成「撤销已生效但攻击者仍可用」的窗口。返回错误让调用方重试。
 func (token *Token) Update() (err error) {
-	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
-		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
+		return fmt.Errorf("refusing token update before cache invalidation: %w", cacheErr)
 	}
 	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups").Updates(token).Error
@@ -336,7 +337,7 @@ func (token *Token) Update() (err error) {
 
 func (token *Token) SelectUpdate() (err error) {
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
-		common.SysLog(common.LogText("failed to invalidate token cache before status update: %s", cacheErr.Error()))
+		return fmt.Errorf("refusing token status update before cache invalidation: %w", cacheErr)
 	}
 	// This can update zero values
 	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
@@ -344,7 +345,7 @@ func (token *Token) SelectUpdate() (err error) {
 
 func (token *Token) Delete() (err error) {
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
-		common.SysLog(common.LogText("failed to invalidate token cache before delete: %s", cacheErr.Error()))
+		return fmt.Errorf("refusing token delete before cache invalidation: %w", cacheErr)
 	}
 	return DB.Delete(token).Error
 }
