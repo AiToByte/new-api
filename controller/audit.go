@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 
@@ -35,8 +36,7 @@ func recordPasskeyDomainAudit(c *gin.Context, change *model.PasskeyDomainChange,
 		Method: c.Request.Method, Route: c.FullPath(), Path: c.FullPath(),
 		Status: c.Writer.Status(), Success: err == nil,
 	}
-	model.RecordOperationAuditLog(c.GetInt("id"), c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), auditInfo, c)
-	markAuditLogged(c)
+	markAuditLoggedOnSuccess(c, model.RecordOperationAuditLog(c.GetInt("id"), c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), auditInfo, c))
 }
 
 // auditOperatorInfo 从上下文构建操作者身份信息（管理员 id/用户名/角色）。
@@ -58,8 +58,23 @@ func auditAuthMethod(c *gin.Context) string {
 
 // markAuditLogged 标记当前请求已在 handler 内手动记录审计日志，
 // 使鉴权链路中的审计兜底（finishAdminAudit）跳过兜底记录，避免重复。
+// 仅用于「确实无需兜底」的场景；如果本函数前面有一次审计写入，
+// 必须改用 markAuditLoggedOnSuccess。
 func markAuditLogged(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyAuditLogged, true)
+}
+
+// markAuditLoggedOnSuccess 仅在审计日志确实写入成功后才标记「已审计」。
+//
+// 审计库故障时若仍无条件标记，middleware.finishAdminAudit 见到标记就跳过
+// 兜底，结果是「精细日志写失败 + 兜底被抑制」＝零留痕且无人知晓。
+// 失败时不标记，让兜底继续尝试记录一条 generic 审计，并输出显式告警。
+func markAuditLoggedOnSuccess(c *gin.Context, writeErr error) {
+	if writeErr != nil {
+		logger.LogWarn(c.Request.Context(), common.LogText("audit log write failed, fallback audit remains enabled error=%q", writeErr.Error()))
+		return
+	}
+	markAuditLogged(c)
 }
 
 // recordManageAudit 记录一条由操作者本人归属的管理/高危审计日志（资源类操作：
@@ -83,8 +98,7 @@ func recordManageAuditFailure(c *gin.Context, action string, params map[string]a
 		Status:  c.Writer.Status(),
 		Success: false,
 	}
-	model.RecordOperationAuditLog(c.GetInt("id"), c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), auditInfo, c)
-	markAuditLogged(c)
+	markAuditLoggedOnSuccess(c, model.RecordOperationAuditLog(c.GetInt("id"), c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), auditInfo, c))
 }
 
 // recordManageAuditFor 记录一条管理审计日志，日志归属于操作者；targetUserId
@@ -97,8 +111,7 @@ func recordManageAuditFor(c *gin.Context, targetUserId int, action string, param
 	if _, ok := params["target_user_id"]; !ok && targetUserId > 0 && targetUserId != operatorUserId {
 		params["target_user_id"] = targetUserId
 	}
-	model.RecordOperationAuditLog(operatorUserId, c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), nil, c)
-	markAuditLogged(c)
+	markAuditLoggedOnSuccess(c, model.RecordOperationAuditLog(operatorUserId, c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), nil, c))
 }
 
 // recordUserSecurityAudit 记录普通用户自己的安全敏感操作（如 passkey 绑定/解绑）。
@@ -123,7 +136,9 @@ func recordUserSecurityAudit(c *gin.Context, userId int, action string, params m
 			Status: c.Writer.Status(), Success: success,
 		}
 	}
-	model.RecordOperationAuditLog(userId, c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, nil, auditInfo, c)
+	if err := model.RecordOperationAuditLog(userId, c.GetInt("role"), service.AuditContentEN(action, params), c.ClientIP(), action, params, nil, auditInfo, c); err != nil {
+		logger.LogWarn(c.Request.Context(), common.LogText("user security audit write failed error=%q", err.Error()))
+	}
 }
 
 func tokenAuditParams(c *gin.Context) model.AuditFields {

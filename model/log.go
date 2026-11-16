@@ -188,7 +188,9 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo *
 		if c != nil {
 			actorRole = c.GetInt("role")
 		}
-		RecordAuditLog(c, AuditLog{UserId: userId, Username: username, ActorRole: actorRole, Category: AuditCategoryOperation, Content: content, Other: AuditOther{AdminInfo: adminInfo, Op: operation}, Success: true})
+		// 管理操作日志（旧链路）：RecordAuditLog 内部已记录写失败，
+		// 调用方无法再做有效降级，显式忽略返回值。
+		_ = RecordAuditLog(c, AuditLog{UserId: userId, Username: username, ActorRole: actorRole, Category: AuditCategoryOperation, Content: content, Other: AuditOther{AdminInfo: adminInfo, Op: operation}, Success: true})
 		return
 	}
 	if len(request) > 0 && request[0] != nil {
@@ -217,7 +219,8 @@ func RecordLoginLog(userId, actorRole int, username string, content string, ip s
 	if len(request) > 0 {
 		c = request[0]
 	}
-	RecordAuditLog(c, AuditLog{UserId: userId, Username: username, ActorRole: actorRole, Category: AuditCategoryLogin, Action: action, Content: content, Ip: ip, Other: other, Success: true})
+	// 登录日志不参与「已审计」标记决策；写失败由内部 LogError 记录。
+	_ = RecordAuditLog(c, AuditLog{UserId: userId, Username: username, ActorRole: actorRole, Category: AuditCategoryLogin, Action: action, Content: content, Ip: ip, Other: other, Success: true})
 }
 
 // RecordOperationAuditLog writes new operation/security events to the audit table.
@@ -226,7 +229,10 @@ func RecordLoginLog(userId, actorRole int, username string, content string, ip s
 // action+params 写入 Other.op，供前端本地化渲染（普通用户可见，不含敏感信息）。
 // adminInfo 存放操作者身份（写入 Other.admin_info，普通用户查询时剥离）；
 // auditInfo 存放路由/方法/结果等中间件兜底信息（写入 Other.audit_info，普通用户查询时剥离）。
-func RecordOperationAuditLog(logUserId, actorRole int, content string, ip string, action string, params map[string]any, adminInfo *AuditAdminInfo, auditInfo *AuditRequestInfo, request ...*gin.Context) {
+//
+// 返回写入错误：controller 的审计 helper 必须据此决定是否标记「已审计」，
+// 否则审计库故障时会抑制鉴权链路的兜底，形成零留痕。
+func RecordOperationAuditLog(logUserId, actorRole int, content string, ip string, action string, params map[string]any, adminInfo *AuditAdminInfo, auditInfo *AuditRequestInfo, request ...*gin.Context) error {
 	username, _ := GetUsernameById(logUserId, false)
 	other := AuditOther{
 		Op:        &AuditOperation{Action: action, Params: params},
@@ -246,7 +252,7 @@ func RecordOperationAuditLog(logUserId, actorRole int, content string, ip string
 		status = auditInfo.Status
 		success = auditInfo.Success
 	}
-	RecordAuditLog(c, AuditLog{UserId: logUserId, Username: username, ActorRole: actorRole, Category: category, Action: action, Content: content, Ip: ip, Status: status, Success: success, Other: other})
+	return RecordAuditLog(c, AuditLog{UserId: logUserId, Username: username, ActorRole: actorRole, Category: category, Action: action, Content: content, Ip: ip, Status: status, Success: success, Other: other})
 }
 
 func RecordTopupLog(userId int, content *common.Message, callerIp string, paymentMethod string, callbackPaymentMethod string) {

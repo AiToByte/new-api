@@ -263,18 +263,20 @@ func UpdateOption(key string, value string) error {
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
-	// Save to database first
-	option := Option{
-		Key: key,
-	}
+	// 必须先持久化、再更新内存：DB 写失败时立即返回，绝不能让 OptionMap
+	// 带着未落库的值继续对外生效（否则重启后配置静默回滚）。
+	// 与 UpdateOptionsBulk 保持同一查错口径。
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	option := Option{Key: key}
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
-	// Save is a combination function.
-	// If save value does not contain primary key, it will execute Create,
-	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
-	// Update OptionMap
+	// Save 在缺少主键时执行 Create，否则执行全字段 Update。
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
+	// 仅在数据库写入成功后同步内存状态。
 	return updateOptionMap(key, value)
 }
 

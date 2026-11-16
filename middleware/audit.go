@@ -251,7 +251,9 @@ func TokenOperationAudit() gin.HandlerFunc {
 			// supplies the result without retaining an unbounded response body.
 			entry.Success = entry.Status < 400 && common.GetContextKeyBool(c, constant.ContextKeyTokenAuditSucceeded)
 		}
-		model.RecordAuditLog(c, entry)
+		// 兜底本身是最后一道留痕，写失败由 RecordAuditLog 内部 LogError 记录；
+		// 此处无更外层链路可继续降级，显式忽略返回值表示「已尽力而为」。
+		_ = model.RecordAuditLog(c, entry)
 	}
 }
 
@@ -315,5 +317,6 @@ func finishAccessTokenAudit(c *gin.Context) {
 	}
 	audit.entry.Status = audit.writer.Status()
 	audit.entry.Success = auditResponseSuccess(audit.entry.Status, audit.writer.body.Bytes())
-	model.RecordAuditLog(c, audit.entry)
+	// 同上：PAT 审计兜底的最后一步，失败已由 RecordAuditLog 内部记录。
+	_ = model.RecordAuditLog(c, audit.entry)
 }

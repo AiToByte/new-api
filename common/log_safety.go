@@ -1,5 +1,7 @@
 package common
 
+import "strings"
+
 // 日志脱敏工具。
 //
 // 支付回调日志里出现过 webhook 签名、完整回调 body、兑换码原文等可用凭据：
@@ -22,4 +24,21 @@ func LogFingerprint(value string) string {
 		return "empty"
 	}
 	return HmacSha256(value, CryptoSecret)[:16]
+}
+
+// LogSafeRequestURI 保留请求路径、把查询串替换为不可逆指纹。
+//
+// 支付回调（尤其是 Epay 的 GET 回调）会把签名与交易参数放在 query string
+// 中，直接记录 c.Request.RequestURI 等于把可重放的凭据写进日志；支付网关
+// 返回的跳转地址同理。路径本身不含凭据，保留它便于定位是哪个回调入口；
+// query 用指纹代替，既能关联同一笔请求，又不泄露原文。
+//
+// 与 LogFingerprint 一样，调用方只替换日志参数值，不改动 LogText 格式串，
+// 因此既有中文翻译条目继续生效。
+func LogSafeRequestURI(requestURI string) string {
+	path, query, found := strings.Cut(requestURI, "?")
+	if !found || query == "" {
+		return path
+	}
+	return path + "?" + LogFingerprint(query)
 }

@@ -69,9 +69,20 @@ func AccessTokenFingerprint(token string) string {
 	return fmt.Sprintf("%x", digest)
 }
 
+// 审计写入失败是安全事件：调用方必须能感知，不能只打印日志后当作成功返回。
+// 尤其不能据此标记「已审计」，否则鉴权链路的兜底审计会被跳过，形成零留痕。
+var (
+	ErrAuditLogUnavailable  = errors.New("audit log database unavailable")
+	ErrAuditLogEncodeFailed = errors.New("audit log payload encode failed")
+	ErrAuditLogWriteFailed  = errors.New("audit log write failed")
+)
+
 // RecordAuditLog captures safe request metadata only; raw URLs, query strings,
 // credentials and response/request bodies must never enter this table.
-func RecordAuditLog(c *gin.Context, entry AuditLog) {
+//
+// 返回 error 供调用方判断是否真的写入成功：controller 的审计 helper 只在
+// 成功时设置 ContextKeyAuditLogged，失败时保留兜底链路继续尝试留痕。
+func RecordAuditLog(c *gin.Context, entry AuditLog) error {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
@@ -114,14 +125,14 @@ func RecordAuditLog(c *gin.Context, entry AuditLog) {
 	}
 	if LOG_DB == nil {
 		logger.LogError(ctx, common.LogText("audit log write failed (request_id=%s): log database unavailable", entry.RequestId))
-		return
+		return ErrAuditLogUnavailable
 	}
 	var row any = &entry
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		encoded, err := common.Marshal(entry.Other)
 		if err != nil {
 			logger.LogError(ctx, common.LogText("audit log write failed (request_id=%s): %v", entry.RequestId, err))
-			return
+			return fmt.Errorf("%w: %v", ErrAuditLogEncodeFailed, err)
 		}
 		// The ClickHouse GORM insert callback passes structs to the native
 		// driver without resolving their Valuer. Bind this column's JSON
@@ -133,7 +144,9 @@ func RecordAuditLog(c *gin.Context, entry AuditLog) {
 	}
 	if err := LOG_DB.Table("audit_logs").Create(row).Error; err != nil {
 		logger.LogError(ctx, common.LogText("audit log write failed (request_id=%s): %v", entry.RequestId, err))
+		return fmt.Errorf("%w: %v", ErrAuditLogWriteFailed, err)
 	}
+	return nil
 }
 
 func GetAuditLogs(filter AuditLogFilter, start, limit, viewerRole int) ([]*AuditLog, int64, error) {

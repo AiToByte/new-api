@@ -124,7 +124,7 @@ func SubscriptionRequestEpay(c *gin.Context) {
 // 存量 pending 订单不得再被合法签名结算，保证「停用生效」。
 func SubscriptionEpayNotify(c *gin.Context) {
 	if !service.IsEpayWebhookEnabled() {
-		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription webhook rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription webhook rejected reason=webhook_disabled path=%q client_ip=%s", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP()))
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -188,7 +188,7 @@ func SubscriptionEpayNotify(c *gin.Context) {
 // 否则撤销合规后仍可通过构造回跳请求绕过停用。
 func SubscriptionEpayReturn(c *gin.Context) {
 	if !service.IsEpayWebhookEnabled() {
-		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription return rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
+		logger.LogWarn(c.Request.Context(), common.LogText("Epay subscription return rejected reason=webhook_disabled path=%q client_ip=%s", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP()))
 		c.Redirect(http.StatusFound, service.PaymentReturnPath("/wallet?pay=fail"))
 		return
 	}
