@@ -698,3 +698,38 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 #### 剩余
 
 §8.7 的【B】类（token 失效 fail-open、option 145 case、协程 shutdown、无界池、日志索引、前端 4.3/4.4/4.6、覆盖率工具链）与【C】类（add_quota proof、relay token、资金写 step-up、OIDC iss+sub、日志异步化）仍未实施。
+
+### 8.11 B 类落地：token 缓存失效 fail-closed（2026-11-16）
+
+提交 `f53dd4874`。这是 §8.7【B】类中唯一有明确安全影响、且能独立落地的项。按 AGENTS.md 的 OWASP 强制条款先行研读指引再实施。遵守资源最小化：零 Docker、`GOMAXPROCS=2 -p 1`、miniredis + sqlite 内存库。
+
+#### OWASP 依据
+
+- **Session Management Cheat Sheet → Logout Button**：同一逻辑会话的所有 session ID 必须一起撤销；撤销完成后不得再被接受用于认证或续期，包括仍在宽限期的历史 ID。
+- **Session Management Cheat Sheet → Server-Side Session Token Storage**：每次请求必须由服务端查证，不能只凭标识符本身放行；不得描述为存在「缓存失败就放行」的回退路径。
+- **Session Management Cheat Sheet → Logging Sessions Life Cycle**：记录会话销毁、失效以及主动防御动作，且不得写入原始凭据。
+- **ASVS 5.0**：V3.2（服务端会话令牌验证）、V3.3（会话终止与失效）。
+
+#### 已修攻击链
+
+1. `Token.Update/SelectUpdate/Delete` 先 `SET fence`，再 `DEL token hash`；DEL 失败时只 `SysLog`，仍继续写库。
+2. `cacheGetTokenByKey` 只读 hash、**不查 fence**，fence 只存在于 `cacheInitToken` 的 Lua 里（冷缓存回填路径）。
+3. 结果：管理员刚停用的令牌，其 `Status=Enabled` 旧 hash 在 TTL（默认 60s）内继续通过 `ValidateUserToken`。
+
+修法：
+- 读侧：`cacheGetTokenByKey` 先 `EXISTS fence`，命中则拒绝（回退 DB）；Redis 故障同样返回 error 而非静默放行。
+- 写侧：三个变更方法在缓存失效失败时中止写库并返回包装 error，调用方可重试。
+- `invalidateTokenCacheForMutation` 在 DEL 失败时**保留 fence**（有意设计：让读路径强制走权威 DB），注释写明顺序与多一次 Redis 往返的取舍。
+
+#### 验证
+
+- `gofmt -l` 无输出；`go build ./...` / `go vet` EXIT=0。
+- 定向回归：model 0.557s / controller 1.013s / common 0.181s / service 0.452s，零失败；既有 token 状态机、Exhausted 自愈、quota reserve 测试全过。
+- 新测试（miniredis，零 Docker）：fence 存在时旧 hash 被拒、TTL 过期后恢复可读；Redis 不可达时读侧 fail-closed；失效失败时 `Update()` 返回 error 且数据库保持原值。
+
+#### 未决 gap（诚实记录）
+
+- **批量用户令牌失效仍为 best-effort**：`invalidateTokensCache` 逐 key 处理、聚合 firstErr；控制器对 `InvalidateUserTokensCache` 的错误只 `SysLog`（用户已删除，无法回滚）。缓解：中间件每次请求复核用户状态（`middleware/auth.go:61/501/600`），被禁用/删除用户独立被拦。单个 token 被停用则完全依赖本次修复的 fence。
+- **fence TTL 固定 10s**：若 DB 写耗时超过 10s，旧快照可能在 fence 过期后被回填；本次未改（需压测确定安全值）。
+- **缓存读多一次 Redis EXISTS**：未用 Lua 合并 EXISTS+HGETALL（要重写 17 字段反序列化，风险大于收益）；本地 Redis 往返开销可忽略。
+- 本批未带 DSN，mysql/postgres 子测试静默 skip，仅 sqlite 分支实证；三方言金标准交 CI。
