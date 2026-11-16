@@ -575,11 +575,11 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 | A4 ✅ | **配置同步读错误被丢弃** | `model/option.go:208` `options, _ := AllOption()`；`:215-218` 逐 key 失败仅 SysLog；`SyncOptions:225` 每 60s 重放 145 legacy key + 25 config 模块 | DB 读失败时注册开关/验证码/限流/密钥变更永不生效且零告警 |
 | A5 ✅ | **渠道缓存原地写导致 data race** | `model/channel_cache.go:270` `channel.Status = status` 直接改缓存对象；读方 `:131` RLock 与 `channel.go:774` 的 `GetChannelPollingLock` 两锁不互斥 | 仿 `CacheUpdateChannel:304`（已替换指针），改浅拷贝写回 `channelsIDM[id]=&copied`，约 3 行 |
 | A6 ✅ | **写锁内三重循环 O(G×M×C)** | `model/channel_cache.go:274-284` 持写锁遍历全 `group2model2channels`；读锁 `:131-223` 还覆盖 `filterCandidateIDs`/`sort.Sort:169`/`rand` | **无需整体重写 atomic.Value**：在 `InitChannelCache:51-99` 顺带建 `channelID→[]group/model` 索引，写锁内 O(1) 定位，2 处改动 |
-| A7 | **前端 footer XSS** | `web/src/components/layout/components/footer.tsx:238` `dangerouslySetInnerHTML={{__html: footerHtml}}` 无净化；对照 `html-content.tsx:126-131`、`markdown.tsx:760` 均用 DOMPurify；`footer_html` 来自服务端可配 | 复用现成 `sanitizeHtmlContent` 即可 |
-| A8 | **渠道 key 前缀写入 Name** | `controller/channel.go:800-805` `BatchAddSetKeyPrefix2Name` 把 key 前 8 位拼进 `Name`；`Omit("key")` 不覆盖 name，`Name` 随 ChannelRead 全量返回并进 `channel.key_view` 审计 | 改用 `common.LogFingerprint` 生成不可逆标识 |
-| A9 | **冷缓存/重试 DB 查询放大** | `model/user.go:1336 GetUserSetting`（`log.go:287/353` 每次日志调用）未命中 1 次 DB，defer `:1318-1324` 又触发 `updateUserCacheField:263` 第 2 次；`GetUsernameById:1547` 同理；`relay.go:279` 每次重选渠道、`:96` 每次同步 `RecordErrorLog` | defer 回填复用已得 `UserBase`/`AuthVersion`，`GetUserSetting` 按请求存 `gin.Context`，3 处改动可减半 |
-| A10 | **鉴权关键路由零测试** | `web/src/routes/` 64 个 `.tsx` 零测试；`routes/oauth/$provider.tsx` 279 行含 code/state 交换、postMessage origin 校验、`sanitizeAuthRedirect`、登录去重 | 已有 Playwright + vitest 基建，补针对性用例即可 |
-| A11 | **`common/` 启动期常量收敛** | 实测 137 个包级变量中 35 个仅 `common/init.go` 写一次、42 个从未赋值；`constants.go:218-246` 20 个限流配置仅 2 文件 25 次读 | 照 `common/disk_cache_config.go:9-41` 只读 struct + getter 范式；顺带清死项（`constants.go:187 GeminiSafetySetting` 0 引用，环境变量完全无效；8 处零调用导出函数） |
+| A7 ✅ | **前端 footer XSS** | `web/src/components/layout/components/footer.tsx:238` `dangerouslySetInnerHTML={{__html: footerHtml}}` 无净化；对照 `html-content.tsx:126-131`、`markdown.tsx:760` 均用 DOMPurify；`footer_html` 来自服务端可配 | 复用现成 `sanitizeHtmlContent` 即可 |
+| A8 ✅ | **渠道 key 前缀写入 Name** | `controller/channel.go:800-805` `BatchAddSetKeyPrefix2Name` 把 key 前 8 位拼进 `Name`；`Omit("key")` 不覆盖 name，`Name` 随 ChannelRead 全量返回并进 `channel.key_view` 审计 | 改用 `common.LogFingerprint` 生成不可逆标识 |
+| A9 ⚠️ 已评估：台账描述不准确，不改 | **冷缓存/重试 DB 查询放大** | `model/user.go:1336 GetUserSetting`（`log.go:287/353` 每次日志调用）未命中 1 次 DB，defer `:1318-1324` 又触发 `updateUserCacheField:263` 第 2 次；`GetUsernameById:1547` 同理；`relay.go:279` 每次重选渠道、`:96` 每次同步 `RecordErrorLog` | defer 回填复用已得 `UserBase`/`AuthVersion`，`GetUserSetting` 按请求存 `gin.Context`，3 处改动可减半 |
+| A10 ⚠️ 已评估：核心纯函数已有测试，不新增 | **鉴权关键路由零测试** | `web/src/routes/` 64 个 `.tsx` 零测试；`routes/oauth/$provider.tsx` 279 行含 code/state 交换、postMessage origin 校验、`sanitizeAuthRedirect`、登录去重 | 已有 Playwright + vitest 基建，补针对性用例即可 |
+| A11 ✅ | **`common/` 启动期常量收敛** | 实测 137 个包级变量中 35 个仅 `common/init.go` 写一次、42 个从未赋值；`constants.go:218-246` 20 个限流配置仅 2 文件 25 次读 | 照 `common/disk_cache_config.go:9-41` 只读 struct + getter 范式；顺带清死项（`constants.go:187 GeminiSafetySetting` 0 引用，环境变量完全无效；8 处零调用导出函数） |
 
 #### 【B】需专门设计 + 压测
 
@@ -673,3 +673,28 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 #### 仍待办
 
 §8.7 的【A】级剩 A7–A11（footer XSS、key 前缀泄露、冷缓存 DB 放大、鉴权路由零测试、`common/` 常量收敛）；【B】【C】类未动。
+
+### 8.10 A7–A11 收尾：三条落地、两条证伪（2026-11-16）
+
+提交 `71bfaa244`。§8.7 的【A】级至此全部处理完毕。遵守资源最小化：后端零 Docker、`GOMAXPROCS=2 -p 1`；前端未执行 `bun install`（`node_modules` 缺失，安装会下载大量依赖，与资源约束冲突）。
+
+#### 落地
+
+- **A7 footer XSS**：`web/src/components/layout/components/footer.tsx` 对服务端可配置的 `footer_html` 在 `dangerouslySetInnerHTML` 前跑 `DOMPurify.sanitize`（`useMemo` 缓存），与 `html-content.tsx` / `markdown.tsx` 同策略。管理员可配内容不等于可信（会话被盗、配置导入/备份恢复均可能注入脚本）。
+- **A8 渠道 key 前缀泄露**：`BatchAddSetKeyPrefix2Name` 从 key 前 8 位明文改为 `common.LogFingerprint(key)` 不可逆指纹。`Name` 随所有 ChannelRead 返回并进 `channel.key_view` 审计，明文前缀等于泄露可用凭据片段。静态守卫测试防止回退。
+- **A11 死配置**：删除 `common.GeminiSafetySetting` 与 `GEMINI_SAFETY_SETTING` 环境变量读取。实证该变量只有声明与赋值、零读取；真正生效的是 `setting/model_setting.GetGeminiSafetySetting(key)`（有独立单测）。**其余 41 个所谓「零赋值变量」未批量删除**——收敛需逐项取证，避免误删。启动期常量的 struct+getter 重构留作 B 类设计项。
+
+#### 证伪（台账原描述不准确，不按原案改）
+
+- **A9「冷缓存 defer 二次查库」**：读码核实 `GetUserSetting` / `GetUsernameById` 的 defer 里是 `gopool.Go(updateUserSettingCache/updateUserNameCache)` —— **异步 Redis 写，不是第二次 DB 查询**。Redis 命中时根本不查库；调用面仅 2 处日志 + 2 处 controller。按请求缓存会引入缓存一致性风险却无实证收益，故不改。
+- **A10「鉴权路由零测试」**：`web/src/routes/` 的路由组件本身确实无测试，但真正的安全关键纯函数 `sanitizeAuthRedirect` 已在 `web/src/features/auth/lib/auth-redirect.test.ts` 有 3 组用例（内部路径保留、外部/歧义目标拒绝、非法 origin 拒绝），`oauth-bind-window.test.ts` / `telegram-login.test.ts` 亦存在。组件测试需要完整渲染环境且依赖未安装的前端依赖，成本收益不匹配，不新增。
+
+#### 验证
+
+- `gofmt -l` 无输出；`go build ./...` / `go vet` EXIT=0。
+- 合并定向回归：common 0.162s / model 0.278s / controller 0.926s / setting/model_setting 1.054s / service 0.296s，零失败。
+- 前端 typecheck 未运行（`tsgo` 等依赖缺失），改动与既有已类型检查的 DOMPurify 调用点写法一致，需 CI 复核。
+
+#### 剩余
+
+§8.7 的【B】类（token 失效 fail-open、option 145 case、协程 shutdown、无界池、日志索引、前端 4.3/4.4/4.6、覆盖率工具链）与【C】类（add_quota proof、relay token、资金写 step-up、OIDC iss+sub、日志异步化）仍未实施。
