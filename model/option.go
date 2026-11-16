@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -192,10 +194,19 @@ func InitOptionMap() {
 	maps.Copy(common.OptionMap, modelConfigs)
 
 	common.OptionMapRWMutex.Unlock()
-	loadOptionsFromDatabase()
+	if err := loadOptionsFromDatabase(); err != nil {
+		common.SysError(common.LogText("failed to load options on init: %s", err.Error()))
+	}
 }
 
-func loadOptionsFromDatabase() {
+// loadOptionsFromDatabase 从数据库重载全部配置到内存。
+//
+// 关键不变量：任何读取/解析失败都不能带着「不完整的数据集」继续覆盖内存。
+// 旧实现忽略 AllOption 的错误，DB 读失败时 options 为 nil，循环不执行，但
+// applyPasskeyDomainOptions(empty) 仍会执行——把已有的 passkey 信任域名
+// 配置清空，且只留一条 info 级日志。现在是读失败立即返回，内存保持上一次
+// 健康状态；调用方（InitOptionMap / SyncOptions）负责显式告警。
+func loadOptionsFromDatabase() error {
 	requestPolicyOptionMutex.Lock()
 	defer requestPolicyOptionMutex.Unlock()
 	defer func() {
@@ -203,21 +214,28 @@ func loadOptionsFromDatabase() {
 			common.SysError(common.LogText("invalid request policy: %s", err.Error()))
 		}
 	}()
+	options, err := AllOption()
+	if err != nil {
+		return fmt.Errorf("read options from database: %w", err)
+	}
+
 	passkeyOptionMutex.Lock()
 	defer passkeyOptionMutex.Unlock()
-	options, _ := AllOption()
 	passkeyOptions := make(map[string]string)
+	var failures []error
 	for _, option := range options {
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
 			continue
 		}
-		err := updateOptionMap(option.Key, option.Value)
-		if err != nil {
-			common.SysLog(common.LogText("failed to update option map: %s", err.Error()))
+		if err := updateOptionMap(option.Key, option.Value); err != nil {
+			// 逐 key 失败不能中断其余配置加载，但必须升到 error 级并聚合
+			// 上报——注册开关/验证码/限流等配置未生效属安全可见性问题。
+			failures = append(failures, fmt.Errorf("option %s: %w", option.Key, err))
 		}
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
+	return errors.Join(failures...)
 }
 
 // SyncOptions 周期性把配置从数据库同步到内存。
@@ -226,7 +244,9 @@ func SyncOptions(frequency int) {
 	for {
 		time.Sleep(common.PeriodicSyncInterval(time.Duration(frequency) * time.Second))
 		common.SysLog(common.LogText("syncing options from database"))
-		loadOptionsFromDatabase()
+		if err := loadOptionsFromDatabase(); err != nil {
+			common.SysError(common.LogText("failed to sync options from database: %s", err.Error()))
+		}
 	}
 }
 

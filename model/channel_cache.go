@@ -19,6 +19,17 @@ import (
 
 var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
+// channelGroupModelIndex 记录每个渠道出现在哪些 (group, model) 桶中。
+// 它与 group2model2channels 在同一把 channelSyncLock 下发布，供
+// CacheUpdateChannelStatus 下线渠道时 O(出现的桶数) 定位，而不是持写锁
+// 遍历整张 G×M×C 的表。
+var channelGroupModelIndex map[int][]channelGroupModelKey
+
+type channelGroupModelKey struct {
+	group string
+	model string
+}
+
 // channel2advancedCustomConfig caches parsed Advanced Custom (type 58) configs so
 // path-aware selection avoids re-parsing JSON per request. Refreshed on full sync.
 var channel2advancedCustomConfig map[int]*kitdto.AdvancedCustomConfig
@@ -49,6 +60,7 @@ func InitChannelCache() {
 		groups[ability.Group] = true
 	}
 	newGroup2model2channels := make(map[string]map[string][]int)
+	newChannelGroupModelIndex := make(map[int][]channelGroupModelKey)
 	for group := range groups {
 		newGroup2model2channels[group] = make(map[string][]int)
 	}
@@ -64,6 +76,7 @@ func InitChannelCache() {
 					newGroup2model2channels[group][model] = make([]int, 0)
 				}
 				newGroup2model2channels[group][model] = append(newGroup2model2channels[group][model], channel.Id)
+				newChannelGroupModelIndex[channel.Id] = append(newChannelGroupModelIndex[channel.Id], channelGroupModelKey{group: group, model: model})
 			}
 		}
 	}
@@ -80,6 +93,7 @@ func InitChannelCache() {
 
 	channelSyncLock.Lock()
 	group2model2channels = newGroup2model2channels
+	channelGroupModelIndex = newChannelGroupModelIndex
 	//channelsIDM = newChannelId2channel
 	for i, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
@@ -266,19 +280,26 @@ func CacheUpdateChannelStatus(id int, status int) {
 	}
 	channelSyncLock.Lock()
 	defer channelSyncLock.Unlock()
+
+	// 绝不原地改缓存对象：读方可能在 RLock 内持有同一指针，且渠道轮询状态
+	// 由另一把锁保护。仿 CacheUpdateChannel 的做法做浅拷贝后替换指针，
+	// 让旧读者继续看到一致的旧快照。
 	if channel, ok := channelsIDM[id]; ok {
-		channel.Status = status
+		updated := *channel
+		updated.Status = status
+		channelsIDM[id] = &updated
 	}
+
 	if status != common.ChannelStatusEnabled {
-		// delete the channel from group2model2channels
-		for group, model2channels := range group2model2channels {
-			for model, channels := range model2channels {
-				for i, channelId := range channels {
-					if channelId == id {
-						// remove the channel from the slice
-						group2model2channels[group][model] = append(channels[:i], channels[i+1:]...)
-						break
-					}
+		// 按预建索引只遍历该渠道实际出现的 (group, model) 桶，
+		// 不再持写锁遍历整张 group2model2channels（G×M×C）。
+		// 索引与 group2model2channels 同锁发布，因此此处读到的一致。
+		for _, loc := range channelGroupModelIndex[id] {
+			channels := group2model2channels[loc.group][loc.model]
+			for i, channelId := range channels {
+				if channelId == id {
+					group2model2channels[loc.group][loc.model] = append(channels[:i], channels[i+1:]...)
+					break
 				}
 			}
 		}
