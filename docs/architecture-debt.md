@@ -733,3 +733,32 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 - **fence TTL 固定 10s**：若 DB 写耗时超过 10s，旧快照可能在 fence 过期后被回填；本次未改（需压测确定安全值）。
 - **缓存读多一次 Redis EXISTS**：未用 Lua 合并 EXISTS+HGETALL（要重写 17 字段反序列化，风险大于收益）；本地 Redis 往返开销可忽略。
 - 本批未带 DSN，mysql/postgres 子测试静默 skip，仅 sqlite 分支实证；三方言金标准交 CI。
+
+### 8.12 生命周期子集 + option.go 重估（2026-11-17）
+
+提交 `a8c537998`。全程零 Docker、`GOMAXPROCS=2 -p 1`。
+
+#### 落地：系统监控可取消
+
+- `common.StartSystemMonitor` 改为持有包级 cancel 句柄（重复启动幂等），新增 `StopSystemMonitor`；`main.go` 关停段调用它。
+- 循环从无退出路径的 `for{}` + `time.Sleep` 改为每轮重建 timer + `select ctx.Done()`：禁用状态下不再有无意义空转，取消立即生效（无需等 30s），且配置间隔变化下一轮即生效。
+- 测试：Start/Stop 幂等与重启；取消后 1s 内 done channel 关闭。
+- 范围说明：本轮只做系统监控。`SyncOptions` / `SyncChannelCache` / `InitBatchUpdater` / `StartSystemTaskRunner` 等常驻循环仍需把 context 从 main.go 逐层传下去，属更广的签名变更，留给专门的 pass。
+
+#### 重估：option.go 145 case 去重 —— 不做（纠正上一轮判断）
+
+台账 B 类原称「145 个 case 与 145 个默认值逐字重复，抽 key→setter 表即可」。本轮读码核实后**推翻该判断**：
+
+- `InitOptionMap`（`:35-195`）写的是 `common.OptionMap[key] = strconv.FormatXxx(common.Xxx)`，即「变量 → 格式化字符串」。
+- `updateOptionMap`（`:370-690`）写的是 `common.Xxx = boolValue/intValue`，即「字符串 → 包变量」，且按 `strings.HasSuffix(key, "Permission"/"Enabled")` 分组，另有 `handleConfigUpdate`、`jsplugin.DefaultRegistry.SetEnabled/SetDisabledFactoryKeys`、`setting/config` 分发等副作用。
+- 两者是**方向相反的两套逻辑**，不是简单重复。key 集合也已漂移：仅 Init 有 9 个（About/HomePageContent/Notice/PayMethods/WaffoPayMethods 等），仅 switch 有 3 个（LinuxDOClientId/ClientSecret/MinimumTrustLevel）。
+- 统一需要为 145 个 key 建模各自的类型（bool/int/float/string/[]string/JSON）与副作用，属高风险大重构，远超「纯结构重构、不改行为」。按「高风险项仅给方案」原则本轮不实施。若未来要做，正确做法是先补「Init 默认值集合 == switch 可写集合」的一致性测试，再按类型分组逐步收敛，且必须保留漂移的 12 个 key 的现状语义直至产品确认。
+
+#### 环境备注
+
+本轮多次遇到 Windows Go 构建临时目录 `Access is denied`（`D:/data/GOTEMP/.../_pkg_.a`），`go clean -cache` 与换 `GOTMPDIR` 均无法立即解决，等待约 20s 后恢复。属杀毒软件实时扫描锁定新生成 `.a` 文件，与代码无关；期间 `gofmt` 可正常执行。
+
+#### 验证
+
+- `gofmt -l` 无输出；`go build ./...` / `go vet ./common/ ./model/` EXIT=0。
+- 合并定向回归：common 0.174s / model 0.480s / controller 0.851s / service 0.320s，零失败。
