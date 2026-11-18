@@ -70,11 +70,16 @@ func TestLogSafeRequestURINoQuery(t *testing.T) {
 	}
 }
 
-// TestPaymentWebhookLogsDoNotContainRawParams 静态守卫：Epay 日志的格式串
-// 是中文翻译表的 key，因此只能替换参数值。这里确认源码中所有
-// GetJsonString(params) 都已被指纹包裹，防止后续重构悄悄退回明文。
+// TestPaymentWebhookLogsDoNotContainRawParams 静态守卫：日志格式串是中文
+// 翻译表的 key，因此只能替换参数值。这里确认所有支付 webhook 的源码中
+// 都不再有裸 RequestURI / 明文 params，防止后续重构悄悄退回明文。
 func TestPaymentWebhookLogsDoNotContainRawParams(t *testing.T) {
-	for _, path := range []string{"topup.go", "subscription_payment_epay.go"} {
+	// 覆盖所有带 path=%q 日志的支付回调实现（Epay 上下单/订阅 + 其他渠道）。
+	files := []string{
+		"topup.go", "subscription_payment_epay.go",
+		"topup_waffo.go", "topup_stripe.go", "topup_creem.go", "topup_waffo_pancake.go",
+	}
+	for _, path := range files {
 		content, err := os.ReadFile(filepath.Join("..", "controller", path))
 		if err != nil {
 			t.Fatalf("读取 %s 失败: %v", path, err)

@@ -197,26 +197,26 @@ const (
 func StripeWebhook(c *gin.Context) {
 	ctx := c.Request.Context()
 	if !service.IsStripeWebhookEnabled() {
-		logger.LogWarn(ctx, common.LogText("Stripe webhook rejected reason=webhook_disabled path=%q client_ip=%s", c.Request.RequestURI, c.ClientIP()))
+		logger.LogWarn(ctx, common.LogText("Stripe webhook rejected reason=webhook_disabled path=%q client_ip=%s", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP()))
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
 
 	payload, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		logger.LogError(ctx, common.LogText("Stripe webhook failed to read request body path=%q client_ip=%s error=%q", c.Request.RequestURI, c.ClientIP(), err.Error()))
+		logger.LogError(ctx, common.LogText("Stripe webhook failed to read request body path=%q client_ip=%s error=%q", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
 
 	signature := c.GetHeader("Stripe-Signature")
-	logger.LogInfo(ctx, common.LogText("Stripe webhook received request path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), common.LogFingerprint(signature), common.LogFingerprint(string(payload))))
+	logger.LogInfo(ctx, common.LogText("Stripe webhook received request path=%q client_ip=%s signature=%q body=%q", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP(), common.LogFingerprint(signature), common.LogFingerprint(string(payload))))
 	event, err := webhook.ConstructEventWithOptions(payload, signature, setting.StripeWebhookSecret, webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,
 	})
 
 	if err != nil {
-		logger.LogWarn(ctx, common.LogText("Stripe webhook signature verification failed path=%q client_ip=%s error=%q", c.Request.RequestURI, c.ClientIP(), err.Error()))
+		logger.LogWarn(ctx, common.LogText("Stripe webhook signature verification failed path=%q client_ip=%s error=%q", common.LogSafeRequestURI(c.Request.RequestURI), c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
