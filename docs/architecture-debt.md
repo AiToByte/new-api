@@ -762,3 +762,30 @@ Phase 0 地基 ──┬──> Phase 1 relay 核心 ──> Phase 2 计费（�
 
 - `gofmt -l` 无输出；`go build ./...` / `go vet ./common/ ./model/` EXIT=0。
 - 合并定向回归：common 0.174s / model 0.480s / controller 0.851s / service 0.320s，零失败。
+
+### 8.13 支付 webhook 日志脱敏补全（2026-11-18）
+
+提交 `e2592e85f`。零 Docker、`GOMAXPROCS=2 -p 1`。
+
+#### 背景与发现
+
+§8.6/§8.8 只修了 Epay 的日志脱敏。本轮全面审计其他支付渠道，发现虽然 `signature` / `body` 都已用 `common.LogFingerprint`，但 `path=%q` 参数仍传裸 `c.Request.RequestURI`：Waffo 6 处、Stripe 4 处、Creem 7 处、Waffo Pancake 5 处，共 22 处。
+
+这些是 POST webhook，正常请求参数在 body；但带查询串的请求（调试调用、错误配置的代理、探测流量）会把 query 原文写进日志，与 Epay 属同类风险。
+
+#### 实现
+
+- 22 处统一改为 `common.LogSafeRequestURI(c.Request.RequestURI)`：保留路径便于定位回调入口，query 替换为不可逆指纹。
+- **格式串逐字不动**（`LogText` 格式串是 `log_text.zh-CN.json` 的翻译 key）。
+- 静态守卫测试从 2 个文件扩展到 6 个（含本次 4 个）：出现裸 `c.Request.RequestURI, c.ClientIP()` 或未包裹的 `GetJsonString(params)` 即失败。
+
+#### 验证
+
+- `gofmt` / `go build ./...` 全绿。
+- 定向回归：common 0.167s / model 0.390s / controller 1.025s / service 0.323s，零失败。
+
+#### 同轮证伪（未改）
+
+- **rate-limit ticker「泄漏」**：`InMemoryRateLimiter` 是 middleware 包级单例，`Init` 幂等，ticker 本应随进程存活并在退出时消亡，不构成生产泄漏；仅在测试中反复 `Init` 新实例会累积 goroutine。为避免引入无必要的生命周期 API，不改。
+- **gopool 无界池**：`math.MaxInt32` 影响所有 relay 路径，改成有界需压测确定容量与降级策略，按「高风险仅给方案」不改。
+- **`setting/config.LoadFromDB` 零调用**：生产路径已由 `updateOptionMap → handleConfigUpdate` 逐 key 分发，接线会造成重复更新，不改。
